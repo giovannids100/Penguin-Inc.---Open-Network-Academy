@@ -17,8 +17,8 @@
 #       richiesta   la domanda del giocatore (il testo del pulsante)
 #       risposta    cosa dice il collega (si vede solo dopo aver pagato)
 #       livello     facoltativo: l'aiuto si chiede solo mentre si gioca quel livello del giorno
-#       azioni      facoltativo: cosa fa il collega sulla rete vera di Packet Tracer
-#                     comandi:      {dispositivo, righe: [righe IOS]}   «@PC3» = l'IP attuale di PC3
+#       azioni      facoltativo: cosa fa il collega sulla rete vera
+#                     comandi:      {dispositivo, righe: [righe della console]}   «@PC3» = l'IP attuale di PC3
 #                     spegni_porta: {dispositivo, porta}
 #                     ip_host:      {dispositivo, ip, maschera, gateway}
 #                     aggiungi:     {tipo, nome, x, y}      tipo: router, switch, pc, server (se non c'è già)
@@ -43,7 +43,7 @@ personaggi:
 giorni:
 
   # I giorni sono stati riscritti: il giorno 1 ha tre challenge (missioni g1-* di accademia.yaml), con le
-  # topologie di partenza come file .pkt. I giorni successivi arriveranno con le loro challenge.
+  # topologie di partenza come file .yaml in reti/. I giorni successivi arriveranno con le loro challenge.
   - numero: 1
     titolo: Costruire e collegare le prime reti
     missioni: [g1-lan, g1-esterno, g1-reparti]
@@ -53,7 +53,7 @@ giorni:
           Benvenuto in Penguins Inc.! Io sono Pinna, la tua senior. Qui facciamo reti e
           sicurezza per i clienti di tutto il Polo.
       - pinna: >-
-          Il tavolo che vedi è collegato a Packet Tracer: quello che costruisci qui succede
+          Il tavolo che vedi è una rete vera: quello che costruisci qui succede
           davvero. Oggi tre challenge: la prima LAN, l'uscita verso l'esterno e due reparti separati.
     dopo:
       - pinna: Ottimo lavoro! Ecco il tuo primo buono caffè guadagnato.

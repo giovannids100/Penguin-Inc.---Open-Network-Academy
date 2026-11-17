@@ -1,0 +1,71 @@
+# Pronto Soccorso, livello 3 (Reparti separati): la rete di partenza, prima dei guasti.
+
+dispositivi:
+  - nome: R1
+    tipo: router
+    pos: [725, 118]
+    config: |
+      interface GigabitEthernet0/0
+       no shutdown
+      interface GigabitEthernet0/0.10
+       encapsulation dot1Q 10
+       ip address 192.168.0.1 255.255.255.0
+      interface GigabitEthernet0/0.20
+       encapsulation dot1Q 20
+       ip address 192.168.1.1 255.255.255.0
+      ip dhcp excluded-address 192.168.0.1 192.168.0.1
+      ip dhcp excluded-address 192.168.1.1 192.168.1.1
+      ip dhcp pool VLAN_10
+       network 192.168.0.0 255.255.255.0
+       default-router 192.168.0.1
+       dns-server 8.8.8.8
+      ip dhcp pool VLAN_20
+       network 192.168.1.0 255.255.255.0
+       default-router 192.168.1.1
+       dns-server 8.8.8.8
+  - nome: SW1
+    tipo: switch
+    pos: [725, 262]
+    config: |
+      vlan 10
+       name VLAN10
+      vlan 20
+       name VLAN20
+      interface FastEthernet0/1
+       switchport mode access
+       switchport access vlan 10
+      interface FastEthernet0/2
+       switchport mode access
+       switchport access vlan 20
+      interface FastEthernet0/3
+       switchport mode access
+       switchport access vlan 10
+      interface FastEthernet0/4
+       switchport mode access
+       switchport access vlan 20
+      interface GigabitEthernet0/1
+       switchport mode trunk
+       switchport trunk allowed vlan 10,20
+  - nome: PC1
+    tipo: pc
+    pos: [554, 418]
+    ip: dhcp
+  - nome: PC2
+    tipo: pc
+    pos: [668, 418]
+    ip: dhcp
+  - nome: PC3
+    tipo: pc
+    pos: [782, 418]
+    ip: dhcp
+  - nome: PC4
+    tipo: pc
+    pos: [896, 418]
+    ip: dhcp
+
+cavi:
+  - [R1, GigabitEthernet0/0, SW1, GigabitEthernet0/1]
+  - [SW1, FastEthernet0/1, PC1, FastEthernet0]
+  - [SW1, FastEthernet0/2, PC2, FastEthernet0]
+  - [SW1, FastEthernet0/3, PC3, FastEthernet0]
+  - [SW1, FastEthernet0/4, PC4, FastEthernet0]

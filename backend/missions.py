@@ -1,13 +1,13 @@
 """Regole delle missioni dell'Accademia: i controlli sulla rete vera che le missioni usano.
 
 Ogni passo è un controllo sulla *fotografia* (istantaneo, ricalcolato a ogni lettura dello stato) oppure un
-*ping* vero eseguito in Packet Tracer quando il giocatore preme «Verifica».
+*ping* vero eseguito sulla rete quando il giocatore preme «Verifica».
 I controlli sono tolleranti: accettano qualsiasi indirizzamento sensato, gli IP suggeriti sono solo un aiuto.
 
 I contenuti delle missioni (testi, punti, ordine dei passi) stanno in accademia.yaml del pacchetto di gioco
 (contenuti.py): qui ci sono solo i controlli e i piani di ping, nei registri CONTROLLI e PIANI_PING, che il
 YAML richiama per nome. Come aggiungere una missione: docs/ARCHITETTURA.md, «Aggiungere una missione».
-Questo file non chiama Packet Tracer: lavora solo sulla Topo che riceve.
+Questo file non tocca la rete: lavora solo sulla Topo che riceve.
 """
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from typing import Callable
 
 import rescue as RS
-from ptlink import Topo, short_port
+from rete.topo import Topo, short_port
 
 # Controllo di un passo: (fatto, cosa manca detto al giocatore).
 Check = Callable[[Topo], tuple[bool, str]]
@@ -33,7 +33,7 @@ class Step:
     verifica   verifiche esatte sulla rete vera (rescue.Check: ping, bloccato, attraversa…) a «Verifica»;
                devono passare tutte
     domanda    una domanda al giocatore: {"testo", "scelte", "giusta", "spiegazione"}; si completa rispondendo
-    osserva    il giocatore guarda il viaggio di un ping (traccia di PT): {"da", "a", "spiegazione"}
+    osserva    il giocatore guarda il viaggio di un ping (traccia passo per passo): {"da", "a", "spiegazione"}
     """
     text: str
     hint: str
@@ -60,8 +60,8 @@ class Mission:
     """Una missione (una «challenge» di un giorno): id, titolo, punti, storia, teoria in pillole
     [(concetto, spiegazione)], passi.
 
-    rete       la topologia di partenza, preparata in Packet Tracer quando la missione comincia: il nome di un
-               file .pkt (nella cartella reti/ del pacchetto di gioco), oppure "vuota" (il tavolo viene svuotato).
+    rete       la topologia di partenza, preparata quando la missione comincia: il nome di un
+               file .yaml (nella cartella reti/ del pacchetto di gioco), oppure "vuota" (il tavolo viene svuotato).
                "" = si continua dalla rete che c'è.
     tutorial   True: missione guidata (aiuti dei passi e messaggi su cosa manca). False: il giocatore vede solo
                le condizioni da raggiungere, l'aiuto lo chiede al collega senior (consigli).
@@ -1212,8 +1212,8 @@ COPPIE: dict[str, Callable] = {
 }
 
 
-# ───────────────────────────── giorno 3: DMZ, VPN e cloud (rete di partenza reti/giorno3.pkt) ─────────────────────────────
-# I dispositivi della rete di partenza hanno i nomi del .pkt (INTERNET, R1, R2, WEB, INTRANET, PC1, PC2, PC-ESTERNO);
+# ───────────────────────────── giorno 3: DMZ, VPN e cloud (rete di partenza reti/giorno3.yaml) ─────────────────────────────
+# I dispositivi della rete di partenza hanno i nomi della topologia (INTERNET, R1, R2, WEB, INTRANET, PC1, PC2, PC-ESTERNO);
 # quelli che aggiunge il giocatore (firewall, switch, il PC della VPN, il cloud) si riconoscono dalla forma.
 G3_ESTERNO, G3_WEB, G3_INTRANET, G3_UTENTI = "PC-ESTERNO", "WEB", "INTRANET", ("PC1", "PC2")
 
@@ -1372,8 +1372,8 @@ PIANI_VERIFICA.update({
 })
 
 
-# ───────────────────────────── giorno 4: attacchi in corso (rete di partenza reti/giorno4.pkt) ─────────────────────────────
-# La rete è quella del .pkt: i nomi sono noti. Il traffico «sospetto» lo genera il «traffico» delle missioni (sniffer).
+# ───────────────────────────── giorno 4: attacchi in corso (rete di partenza reti/giorno4.yaml) ─────────────────────────────
+# La rete è quella della topologia: i nomi sono noti. Il traffico «sospetto» lo genera il «traffico» delle missioni (sniffer).
 G4_COMPROMESSO = "PC3"   # 4.1: tenta gli accessi FTP al server dei file
 
 

@@ -70,7 +70,7 @@ canvas { display: block; width: 100%; height: 100%; image-rendering: pixelated; 
   <button id="intero" type="button" aria-label="Schermo intero">⛶</button>
   <button id="registra" class="rec" type="button" hidden>⏺ Registra video</button>
 </div>
-<p class="nota" id="nota">Trailer di <b>Penguin Inc</b>, il serious game su reti e cybersicurezza dentro Cisco Packet Tracer. Durata 2:30, con musica. Le schermate del gioco sono catture vere, mentre lavora su Packet Tracer.</p>
+<p class="nota" id="nota">Trailer di <b>Penguin Inc</b>, il serious game su reti e cybersicurezza su una rete vera, costruita con Mininet. Durata 2:30, con musica. Le schermate del gioco sono catture vere.</p>
 
 <script>
 "use strict";
@@ -221,7 +221,7 @@ function didascalia(t, a, b, s, y = 70, dim = 24, colore = "#fff") {
 }
 
 /* ───────────── le schermate vere del gioco ─────────────
- * Le immagini in trailer/ sono catture del gioco vero (800×600) mentre lavora su Packet Tracer.
+ * Le immagini in trailer/ sono catture del gioco vero (800×600).
  * schermata() le mostra a tutta altezza con un lento avvicinamento verso il punto che conta. */
 function schermata(k, t, a, b, fuoco = [400, 300], zoomFinale = 1.4) {
   g.fillStyle = C.notte; g.fillRect(0, 0, W, H);
@@ -312,7 +312,7 @@ function primoGiorno(t) {
   didascalia(t, 15.1, 17.2, "GIORNO 1", 64, 28, C.oro);
   battute(t, [
     [17.5, 20.8, "sr", "caffe", "Eccoti! Tu devi essere Pina, la nuova recluta."],
-    [20.8, 24.3, "sr", "tastiera", "Qui le reti si costruiscono davvero: con Cisco Packet Tracer."],
+    [20.8, 24.3, "sr", "tastiera", "Qui le reti si costruiscono davvero: ogni dispositivo è una macchina Linux."],
     [24.3, 26.6, "jr", "preoccupato", "Ma io di reti non so niente…"],
     [26.6, 29, "sr", "caffe", "Per questo sei qui. Si impara facendo!"],
   ]);
@@ -342,7 +342,7 @@ function difficolta(t) {
   }
 }
 
-/* L'interfaccia vera: catture del gioco mentre lavora su Packet Tracer. */
+/* L'interfaccia vera: catture del gioco. */
 function interfaccia(t) {
   if (t < 44) {
     schermata("s01", t, 38, 44, [150, 290], 1.7);
@@ -473,7 +473,7 @@ function finale(t) {
     const a = lin(t, 139.3, 140.1);
     g.save(); g.globalAlpha = a;
     testo("Un serious game per chi parte da zero:", W / 2, 565, VT(38), C.ghiaccio);
-    testo("si impara facendo, su reti vere, dentro Cisco Packet Tracer.", W / 2, 605, VT(38), C.ghiaccio);
+    testo("si impara facendo, su reti vere, costruite con Mininet.", W / 2, 605, VT(38), C.ghiaccio);
     g.restore();
   }
   if (t > 141.5) { const a = lin(t, 141.5, 142.3); g.save(); g.globalAlpha = a; testo("The Big Hack 2026 · Napoli", W / 2, 670, VT(32), C.tenue); g.restore(); }

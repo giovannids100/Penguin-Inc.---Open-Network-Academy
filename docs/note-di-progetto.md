@@ -2,7 +2,7 @@ ufficio di penguins inc. , azienda di networking e cyber security
 
 il giocatore è un pinguino impiegato al suo primo giorno di lavoro.
 
-il gioco si divide in challenge giornaliere, ogni giorno il pinguino senior viene da noi e ci da una task da fare tramite l'interfaccia simil packet tracer.
+il gioco si divide in challenge giornaliere, ogni giorno il pinguino senior viene da noi e ci da una task da fare tramite l'interfaccia del computer dell'ufficio.
 
 il giocatore può provare a risolvere da solo o, se in difficoltà, può andare in giro per la mappa a chiedere aiuto ai colleghi (sotto compenso). per pagare i colleghi dovrai offrire i caffé con i buoni guadagnati ogni giorno. -- opzionale
 

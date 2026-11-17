@@ -1,0 +1,25 @@
+# Penguin Inc. — Open Network Academy, per giocare sul proprio computer:
+#   docker compose up --build      poi apri http://127.0.0.1:8787
+#
+# Il container gira come utente normale, senza capability e senza «privileged». Il profilo seccomp è quello
+# predefinito di Docker più unshare/setns/mount/umount2: servono al server per creare il suo user namespace
+# e a Mininet per creare la rete di ogni dispositivo. La porta è aperta solo su questo computer.
+services:
+  gioco:
+    build:
+      context: .
+      network: host   # solo per apt e pip durante la build: su alcuni host la rete bridge di Docker non esce
+    image: penguin-inc
+    ports: ["127.0.0.1:8787:8787"]
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+      - seccomp=./deploy/seccomp.json
+    environment:
+      PNA_COLLAUDO: ${PNA_COLLAUDO:-}
+    volumes:
+      - partita:/app/backend/data   # partita e rete salvate: sopravvivono ai riavvii
+    restart: unless-stopped
+
+volumes:
+  partita:

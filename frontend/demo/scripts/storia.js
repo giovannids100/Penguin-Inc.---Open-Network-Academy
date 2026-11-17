@@ -1,9 +1,9 @@
 "use strict";
-/* Penguin Inc: la storyline sopra il motore di PT Academy.
+/* Penguin Inc: la storyline sopra il motore del gioco (app.js).
  *
  * L'ufficio (scena in pixel art) è la schermata principale: il protagonista cammina, parla con Jody (il
  * collega senior), offre caffè, e quando si siede alla scrivania si apre il «monitor», cioè l'interfaccia
- * di PT Academy (app.js) sul tavolo vero di Packet Tracer.
+ * del gioco (app.js) sul tavolo, cioè sulla rete vera costruita con Mininet.
  *
  * Testi, giornate e aiuti sono in frontend/demo/gioco/storia.yaml (arrivano in TESTI.storia). Qui c'è solo
  * il motore: scena, movimenti, dialoghi, avanzamento delle giornate e buoni caffè.
@@ -900,7 +900,7 @@ const Storia = (() => {
     await conAiuto(async () => { for (const k of g.aiuto.comandi || []) await chiama(k.api, k.dati); });
   }
 
-  /* ───────────── monitor (l'interfaccia di PT Academy) ───────────── */
+  /* ───────────── monitor (l'interfaccia del gioco, app.js) ───────────── */
   async function apriMonitor() {
     const av = $("#avvioMonitor");
     av.classList.remove("hidden");
@@ -917,9 +917,9 @@ const Storia = (() => {
     guida();
   }
 
-  /* La challenge in corso parte da un tavolo preciso (vuoto o un file .pkt) e non è ancora stato preparato:
+  /* La challenge in corso parte da un tavolo preciso (vuoto o una topologia di gioco/reti/) e non è ancora stato preparato:
    * lo prepara il server, prima che il giocatore cominci. Così, per esempio, il giorno 1 parte davvero dal
-   * tavolo vuoto anche se in Packet Tracer era rimasta un'altra rete. */
+   * tavolo vuoto anche se sul tavolo era rimasta un'altra rete. */
   let preparata = null;   // la missione di cui si è già chiesto di preparare il tavolo (niente richieste doppie)
   function preparaTavolo() {
     const cur = S && S.academy && S.academy.current;
@@ -1076,11 +1076,11 @@ const Storia = (() => {
     $("#nomeGiocatore").dispatchEvent(new Event("input"));
   }
 
-  /* ───────────── collaudo: cheat per il debug (solo con PTA_COLLAUDO=1 sul server) ─────────────
+  /* ───────────── collaudo: cheat per il debug (solo con PNA_COLLAUDO=1 sul server) ─────────────
    * Strumento per chi sviluppa, non per chi gioca: i testi sono qui e non in storia.yaml.
    * Il pannello 🐞 (o F9) permette di saltare a una giornata, completarla, dare buoni caffè, saltare i
    * dialoghi (anche solo quello in corso, con Esc) e camminare più veloce. Le missioni dell'Accademia si
-   * segnano con POST /api/collaudo/accademia, che esiste solo in collaudo; il tavolo di PT non viene toccato. */
+   * segnano con POST /api/collaudo/accademia, che esiste solo in collaudo; il tavolo non viene toccato. */
   const missioniPrimaDel = (n) => giorni()
     .filter((g) => g.numero < n && (g.monitor || {}).modalita !== "rescue")
     .flatMap((g) => g.monitor.missioni || []);
@@ -1139,7 +1139,7 @@ const Storia = (() => {
     box.innerHTML = `<button class="collaudo-tasto" title="Collaudo (F9)">🐞</button>
       <div class="collaudo-pannello">
         <h3>🐞 Collaudo</h3>
-        <p class="muted">PTA_COLLAUDO=1 · solo per il debug</p>
+        <p class="muted">PNA_COLLAUDO=1 · solo per il debug</p>
         <div class="collaudo-riga"><span>Vai al giorno</span>
           ${numeri.map((n) => `<button class="btn small" data-giorno="${n}">${n}</button>`).join("")}
           <button class="btn small" data-giorno="${ultimo() + 1}">Finale</button></div>
@@ -1152,7 +1152,7 @@ const Storia = (() => {
         <div class="collaudo-riga"><button class="btn small danger" data-azione="azzera">↺ Azzera la storia (il tavolo resta)</button></div>
         <p class="muted">F9 apre e chiude · Esc salta il dialogo in corso.<br>
           «Vai al giorno», «Salta» e «Completa» segnano le missioni senza costruire la rete
-          (la challenge dopo parte dalla rete che c'è, o dal suo .pkt se ne ha uno).</p>
+          (la challenge dopo parte dalla rete che c'è, o dalla sua topologia se ne ha una).</p>
       </div>`;
     document.body.appendChild(box);
     const apri = (si) => { CHEAT.aperto = si; salvaCheat(); box.classList.toggle("aperto", si); };

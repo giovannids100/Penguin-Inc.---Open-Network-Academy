@@ -8,20 +8,20 @@
 #   punteggi, dispositivi e tempi in impostazioni.yaml.
 
 generale:
-  nome: PT Academy
+  nome: Penguin Inc.
   titolo_scheda: Penguin INC   # il nome della scheda del browser
-  motto: La rete la costruisci qui, ma vive davvero in <b>Cisco Packet Tracer</b>.
-  caricamento: Collegamento a Packet Tracer…
+  motto: "La rete la costruisci qui, ma vive davvero: ogni dispositivo è una piccola macchina Linux, creata con <b>Mininet</b>."
+  caricamento: Accendo la rete…
   server_irraggiungibile: Server non raggiungibile
   errore: "Errore {codice}"
   fatto: Fatto
   operazione_fallita: Operazione non riuscita
-  collegamento_pt: Collegamento a Packet Tracer
-  stato_pt: "Packet Tracer: {stato}"
+  collegamento_rete: Stato della rete
+  stato_rete: "Rete: {stato}"
   errore_contenuti: "Errore nei file del gioco (vale la versione precedente): {errore}"
   conferma: Conferma
   annulla: Annulla
-  in_coda: "⏳ Packet Tracer sta finendo un'altra operazione: il tuo comando è in coda e parte appena tocca a lui."
+  in_coda: "⏳ La rete sta finendo un'altra operazione: il tuo comando è in coda e parte appena tocca a lui."
 
 accesso:
   codice: Codice di accesso
@@ -78,7 +78,7 @@ accademia:
   verifica_ping: 📡 Verifica
   ricomincia: Ricomincia
   ricomincia_aiuto: Svuota il tavolo e riparti dalla missione 1
-  conferma_ricomincia: Svuoto il tavolo di Packet Tracer e riparto dalla missione 1. Procedo?
+  conferma_ricomincia: Svuoto il tavolo e riparto dalla missione 1. Procedo?
   finita_titolo: 🎉 Accademia completata!
   finita_testo: >-
     Hai costruito una rete con due sedi, DHCP e routing statico. Ora prova il <b>Pronto Soccorso</b>:
@@ -92,10 +92,10 @@ accademia:
   ricomincia_challenge: ↺ Ricomincia la challenge
   ricomincia_challenge_aiuto: Riporta il tavolo com'era all'inizio di questa challenge
   conferma_ricomincia_challenge: >-
-    Riporto il tavolo di Packet Tracer com'era all'inizio della challenge «{titolo}»: quello che hai fatto in
+    Riporto il tavolo com'era all'inizio della challenge «{titolo}»: quello che hai fatto in
     questa challenge si perde. Procedo?
   osserva: 🔍 Guarda il viaggio del ping
-  osserva_in_corso: Packet Tracer sta seguendo il ping passo per passo (10–30 secondi)…
+  osserva_in_corso: Seguo il ping passo per passo…
   traccia_titolo: "Il viaggio del ping da {da} a {a}"
   traccia_arrivato: "✅ Il ping è arrivato e la risposta è tornata."
   traccia_non_arrivato: "❌ Il ping non è arrivato: si ferma su {dove}. Controlla cavi e indirizzi, poi riprova."
@@ -117,7 +117,7 @@ soccorso:
     guasti e riparali. Se ti blocchi puoi chiedere un indizio.
   guasti_del_livello: "{numero} guasti"
   torna_al_livello: "← Torna al livello {numero}"
-  avviso_sostituzione: Avviare un livello sostituisce la rete aperta in Packet Tracer.
+  avviso_sostituzione: Avviare un livello sostituisce la rete che c'è sul tavolo.
   livello: "Livello {numero}"
   guasto: "Guasto {numero}"
   sintomo: "Sintomo: {sintomo}"
@@ -126,7 +126,7 @@ soccorso:
   indizio: "💡 Indizio"
   arrendo: Mi arrendo
   livelli: Livelli
-  conferma_avvio: "Avvio il livello {numero}: la rete aperta in Packet Tracer verrà sostituita. Procedo?"
+  conferma_avvio: "Avvio il livello {numero}: la rete che c'è sul tavolo verrà sostituita. Procedo?"
   conferma_indizio: Vuoi un indizio su questo guasto?
   conferma_arrendo: "Vuoi vedere la soluzione del guasto? Così il guasto conta come non risolto da te."
 
@@ -139,7 +139,7 @@ pannello:
   conferma_togli: "Tolgo {nome} dal tavolo?"
   applica: Applica
   esegui: Esegui
-  in_esecuzione: … in esecuzione in Packet Tracer
+  in_esecuzione: … in esecuzione sulla rete
   errore_console: (errore)
   accesa: accesa
   spenta: spenta
@@ -159,7 +159,7 @@ pc:
   cavo_collegato: "Cavo: collegato a <b>{dispositivo}</b> {porta}"
   cavo_scollegato: "Cavo: <b>non collegato</b>"
   prompt: Prompt dei comandi
-  prompt_aiuto: "Comandi: ping, ipconfig, tracert, arp, nslookup. Un ping fallito impiega ~15 secondi."
+  prompt_aiuto: "Comandi: ping, ipconfig, tracert, arp, nslookup. Un ping fallito impiega un paio di secondi."
   chiedo_dhcp: "{nome}: chiedo un indirizzo al DHCP…"
   configurato: "{nome} configurato"
 
@@ -262,7 +262,7 @@ sicurezza:
   acl_salvata: "ACL {acl} salvata"
   acl_tolta: "ACL {acl} tolta"
   conferma_togli_acl: "Tolgo l'ACL {acl} da {nome}? Viene staccata da tutte le porte."
-  acl_non_leggibile: "Non riesco a leggere questa ACL: modificala dalla console IOS."
+  acl_non_leggibile: "Non riesco a leggere questa ACL: modificala dalla console."
   password: Password di amministratore
   enable_secret: Password di enable (enable secret)
   enable_secret_esempio: almeno 4 caratteri, senza spazi
@@ -324,7 +324,7 @@ firewall:
   tutta_la_zona: tutta la zona
   salva_regole: Salva e applica
   regole_salvate: Regole del firewall applicate
-  acl_scritte: Cosa ho scritto sul firewall (ACL dell'ASA)
+  acl_scritte: Cosa ho scritto sul firewall (le sue access-list)
 
 dns:
   titolo: 📇 DNS
@@ -356,7 +356,7 @@ servizi:
   cambiato: "{servizio} {stato}"
   nota: >-
     Ogni servizio acceso è una porta aperta verso il mondo: lascia acceso solo quello che serve.
-    SSH non è un servizio dei server di Packet Tracer: si accende sui router (Sicurezza).
+    SSH non è un servizio dei server del gioco: si accende sui router (Sicurezza).
 
 scansione:
   titolo: 🔍 Scansione delle porte
@@ -398,10 +398,10 @@ limiti:
   salvato: Limite aggiornato
   nota: >-
     Un limite di velocità impedisce a un flusso (per esempio un attacco) di saturare il collegamento.
-    Packet Tracer salva la configurazione ma non ne simula l'effetto sulla velocità.
+    Il limite è vero: il router rallenta davvero il traffico che esce da quella porta.
 
 console:
-  titolo: ⌨️ Console IOS
+  titolo: ⌨️ Console
   sotto: per chi vuole provare i comandi veri
   esempio: |-
     un comando per riga, es.
@@ -453,6 +453,6 @@ aiuti:
   maschera: Dice quanta parte dell'IP è la rete. 255.255.255.0 = i primi tre numeri sono la rete.
   gateway: "L'IP del router nella tua rete: lì vanno i pacchetti diretti ad altre reti."
   dhcp: Il PC chiede da solo IP, maschera e gateway a un server DHCP (di solito il router).
-  porta_accesa: Le porte dei router Cisco nascono spente. Una porta spenta (shutdown) non fa passare niente.
+  porta_accesa: Le porte dei router nascono spente. Una porta spenta (shutdown) non fa passare niente.
   vlan: Una VLAN divide lo switch in «stanze» separate. Le porte nella stessa VLAN si vedono tra loro.
   rotta: Indica al router dove mandare i pacchetti per una rete che non è collegata direttamente.

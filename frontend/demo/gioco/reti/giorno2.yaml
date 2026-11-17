@@ -1,0 +1,48 @@
+# Giorno 2 (challenge 2.1): due reparti già funzionanti dietro R1, che ha una porta libera
+# (GigabitEthernet0/2) per collegare la sala server.
+
+dispositivi:
+  - nome: R1
+    tipo: router
+    pos: [542, 155]
+    config: |
+      interface GigabitEthernet0/0
+       ip address 192.168.10.1 255.255.255.0
+       no shutdown
+      interface GigabitEthernet0/1
+       ip address 192.168.20.1 255.255.255.0
+       no shutdown
+  - nome: SW1
+    tipo: switch
+    pos: [333, 342]
+  - nome: SW2
+    tipo: switch
+    pos: [773, 342]
+  - nome: PC1
+    tipo: pc
+    pos: [222, 538]
+    ip: 192.168.10.11/24
+    gateway: 192.168.10.1
+  - nome: PC2
+    tipo: pc
+    pos: [422, 538]
+    ip: 192.168.10.12/24
+    gateway: 192.168.10.1
+  - nome: PC3
+    tipo: pc
+    pos: [662, 538]
+    ip: 192.168.20.11/24
+    gateway: 192.168.20.1
+  - nome: PC4
+    tipo: pc
+    pos: [862, 538]
+    ip: 192.168.20.12/24
+    gateway: 192.168.20.1
+
+cavi:
+  - [R1, GigabitEthernet0/0, SW1, GigabitEthernet0/1]
+  - [R1, GigabitEthernet0/1, SW2, GigabitEthernet0/1]
+  - [PC1, FastEthernet0, SW1, FastEthernet0/1]
+  - [PC2, FastEthernet0, SW1, FastEthernet0/2]
+  - [PC3, FastEthernet0, SW2, FastEthernet0/1]
+  - [PC4, FastEthernet0, SW2, FastEthernet0/2]

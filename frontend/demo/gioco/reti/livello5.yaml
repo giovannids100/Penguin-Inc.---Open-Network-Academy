@@ -1,0 +1,82 @@
+# Pronto Soccorso, livello 5 (Le foche alla porta): la rete di partenza, prima dei guasti.
+
+dispositivi:
+  - nome: R1
+    tipo: router
+    pos: [569, 268]
+    config: |
+      interface GigabitEthernet0/0
+       ip address 10.0.0.1 255.255.255.252
+       ip ospf network point-to-point
+       no shutdown
+      interface GigabitEthernet0/1
+       ip address 192.168.0.1 255.255.255.0
+       no shutdown
+      ip dhcp excluded-address 192.168.0.1 192.168.0.1
+      ip dhcp excluded-address 192.168.0.4
+      ip dhcp pool LAN_R1_0
+       network 192.168.0.0 255.255.255.0
+       default-router 192.168.0.1
+       dns-server 8.8.8.8
+      router ospf 1
+       router-id 10.0.0.1
+       network 10.0.0.0 0.0.0.3 area 0
+       network 192.168.0.0 0.0.0.255 area 0
+  - nome: R2
+    tipo: router
+    pos: [881, 268]
+    config: |
+      interface GigabitEthernet0/0
+       ip address 10.0.0.2 255.255.255.252
+       ip ospf network point-to-point
+       no shutdown
+      interface GigabitEthernet0/1
+       ip address 192.168.1.1 255.255.255.0
+       no shutdown
+      ip dhcp excluded-address 192.168.1.1 192.168.1.1
+      ip dhcp pool LAN_R2_0
+       network 192.168.1.0 255.255.255.0
+       default-router 192.168.1.1
+       dns-server 8.8.8.8
+      router ospf 1
+       router-id 10.0.0.2
+       network 10.0.0.0 0.0.0.3 area 0
+       network 192.168.1.0 0.0.0.255 area 0
+  - nome: SW1
+    tipo: switch
+    pos: [425, 268]
+  - nome: PC1
+    tipo: pc
+    pos: [269, 154]
+    ip: dhcp
+  - nome: PC2
+    tipo: pc
+    pos: [269, 268]
+    ip: dhcp
+  - nome: SW2
+    tipo: switch
+    pos: [1025, 268]
+  - nome: PC3
+    tipo: pc
+    pos: [1181, 210]
+    ip: dhcp
+  - nome: PC4
+    tipo: pc
+    pos: [1181, 324]
+    ip: dhcp
+  - nome: SRV1
+    tipo: server
+    pos: [269, 382]
+    ip: 192.168.0.4/24
+    gateway: 192.168.0.1
+    servizi: [http, https, ftp, smtp]
+
+cavi:
+  - [R1, GigabitEthernet0/0, R2, GigabitEthernet0/0]
+  - [R1, GigabitEthernet0/1, SW1, GigabitEthernet0/1]
+  - [R2, GigabitEthernet0/1, SW2, GigabitEthernet0/1]
+  - [SW1, FastEthernet0/1, PC1, FastEthernet0]
+  - [SW1, FastEthernet0/2, PC2, FastEthernet0]
+  - [SW2, FastEthernet0/1, PC3, FastEthernet0]
+  - [SW2, FastEthernet0/2, PC4, FastEthernet0]
+  - [SW1, FastEthernet0/3, SRV1, FastEthernet0]

@@ -1,6 +1,6 @@
 # Crediti
 
-**PT Academy · Penguin Inc** è stato sviluppato dal team **Los Penguinos** per The Big Hack 2026:
+**Penguin Inc. — Open Network Academy** è stato sviluppato dal team **Los Penguinos** per The Big Hack 2026:
 
 - [Pasquale Criscuolo](https://github.com/Paki64)
 - [Giovanni Di Stazio](https://github.com/giovannids100)
@@ -21,3 +21,12 @@ La licenza permette l'uso gratuito, anche commerciale, a patto di citare titolo,
 questo i crediti compaiono anche **nel gioco** (titoli di coda nel finale e pulsante «Crediti» della schermata
 iniziale, sezione `crediti` di `frontend/demo/gioco/storia.yaml`). Non toglierli. Se i file audio vengono
 tagliati o modificati, va aggiunto «modificato» accanto al titolo.
+
+## Software
+
+La rete del gioco è costruita con **[Mininet](https://mininet.org/)** (licenza in
+[`deploy/MININET-LICENSE`](deploy/MININET-LICENSE)): il container usa i pacchetti di Ubuntu, più una copia di
+`mnexec.c` di Mininet 2.3.0 modificata per funzionare senza privilegi ([`deploy/mnexec.c`](deploy/mnexec.c)).
+Il resto della rete sono strumenti standard di Linux: `iproute2`, `nftables`, `tc`, `dnsmasq`, `tcpdump`, BusyBox.
+Il server usa [Starlette](https://www.starlette.io/), [Uvicorn](https://www.uvicorn.org/) e
+[PyYAML](https://pyyaml.org/).

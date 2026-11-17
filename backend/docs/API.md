@@ -1,8 +1,8 @@
-# API HTTP di PT Academy
+# API HTTP di Penguin Inc.
 
-Questa è l'API con cui la pagina web comanda Packet Tracer. È pensata per essere riusata: qualsiasi client
-(un'altra pagina, un altro gioco, uno script, un bot) può costruire e leggere reti vere in Packet Tracer
-usando solo queste chiamate, senza sapere niente di MCP o di JavaScript di Packet Tracer.
+Questa è l'API con cui la pagina web comanda la rete del gioco. È pensata per essere riusata: qualsiasi client
+(un'altra pagina, un altro gioco, uno script, un bot) può costruire e leggere reti vere (Mininet: macchine Linux
+con traffico vero) usando solo queste chiamate, senza sapere niente di come la rete è realizzata.
 
 Come funziona dentro e come aggiungere endpoint, missioni o livelli: [ARCHITETTURA.md](ARCHITETTURA.md).
 
@@ -28,7 +28,7 @@ Come funziona dentro e come aggiungere endpoint, missioni o livelli: [ARCHITETTU
 
 | Metodo | Percorso | Cosa fa | Tipo |
 |---|---|---|---|
-| GET | `/api/health` | il server è acceso e vede Packet Tracer? (senza login) | sessione |
+| GET | `/api/health` | il server è acceso e la rete è pronta? (senza login) | sessione |
 | GET | `/api/ui` | testi e impostazioni dell'interfaccia dal pacchetto di gioco (senza login) | sessione |
 | POST | `/api/login` | entra con il codice di accesso | sessione |
 | GET | `/api/state` | stato completo: rete, partita, diario | lettura |
@@ -45,7 +45,7 @@ Come funziona dentro e come aggiungere endpoint, missioni o livelli: [ARCHITETTU
 | POST | `/api/router/route` | aggiunge o toglie una rotta statica | azione |
 | POST | `/api/port/state` | accende o spegne una porta (router o switch) | azione |
 | POST | `/api/switch/vlan` | mette una porta dello switch in una VLAN | azione |
-| POST | `/api/cli` | comandi IOS liberi su router e switch | azione |
+| POST | `/api/cli` | comandi liberi nella console di router e switch | azione |
 | POST | `/api/host/cmd` | ping, ipconfig, tracert… dal prompt di un PC | azione |
 | POST | `/api/ping` | ping vero, con esito sì/no | azione |
 | POST | `/api/router/acl` | crea o sostituisce un'ACL e la applica a una porta | azione |
@@ -60,8 +60,8 @@ Come funziona dentro e come aggiungere endpoint, missioni o livelli: [ARCHITETTU
 | POST | `/api/audit` | trova le falle nella configurazione di router e switch | azione |
 | POST | `/api/device/power` | spegne o accende un dispositivo (guasto simulato) | azione |
 | POST | `/api/router/hsrp` | gateway di scorta tra due router | azione |
-| POST | `/api/firewall/zone` | una porta del firewall (ASA) diventa una zona: inside, dmz, outside… | azione |
-| POST | `/api/firewall/rules` | regole del firewall tra le zone (compilate in ACL dell'ASA) | azione |
+| POST | `/api/firewall/zone` | una porta del firewall diventa una zona: inside, dmz, outside… | azione |
+| POST | `/api/firewall/rules` | regole del firewall tra le zone (compilate nelle access-list del firewall) | azione |
 | POST | `/api/server/services` | servizi esposti da un server (HTTP, HTTPS, FTP, posta) | azione |
 | POST | `/api/server/service` | accende o spegne un servizio di un server | azione |
 | POST | `/api/router/ratelimit` | limite di velocità in uscita su una porta di router (rate limiting) | azione |
@@ -69,7 +69,7 @@ Come funziona dentro e come aggiungere endpoint, missioni o livelli: [ARCHITETTU
 | POST | `/api/sniff` | cattura il traffico che passa da un dispositivo, come Wireshark | lavoro lungo |
 | POST | `/api/academy/check` | verifica la missione in corso | lavoro lungo |
 | POST | `/api/academy/reset` | svuota il tavolo e riparte dalla missione 1 | lavoro lungo |
-| POST | `/api/academy/network` | riporta il tavolo alla rete di partenza della missione in corso (il suo .pkt) | lavoro lungo |
+| POST | `/api/academy/network` | riporta il tavolo alla rete di partenza della missione in corso (la sua topologia) | lavoro lungo |
 | POST | `/api/academy/answer` | risponde alla domanda di un passo della missione | gioco |
 | POST | `/api/academy/observe` | segue il ping di un passo «osserva» nella simulazione e lo restituisce | azione |
 | POST | `/api/rescue/start` | prepara un livello (costruisce e rompe la rete) | lavoro lungo |
@@ -77,8 +77,8 @@ Come funziona dentro e come aggiungere endpoint, missioni o livelli: [ARCHITETTU
 | POST | `/api/rescue/hint` | indizio sul primo guasto aperto | gioco |
 | POST | `/api/rescue/surrender` | mostra la soluzione del primo guasto aperto | gioco |
 | POST | `/api/campaign/help` | compra l'aiuto di un collega (risposta ed eventuali azioni sulla rete) | azione |
-| POST | `/api/campaign/reset` | riporta la campagna al giorno 1 (non tocca Packet Tracer) | gioco |
-| POST | `/api/collaudo/accademia` | *solo con `PTA_COLLAUDO=1`*: segna le missioni completate (cheat per il debug) | gioco |
+| POST | `/api/campaign/reset` | riporta la campagna al giorno 1 (non tocca la rete) | gioco |
+| POST | `/api/collaudo/accademia` | *solo con `PNA_COLLAUDO=1`*: segna le missioni completate (cheat per il debug) | gioco |
 
 I tipi decidono la forma della risposta: **azione** e **gioco** rispondono con lo [Stato](#loggetto-stato)
 aggiornato, **lavoro lungo** risponde subito e prosegue in background ([vedi sotto](#operazioni-lunghe-i-lavori)).
@@ -87,21 +87,21 @@ aggiornato, **lavoro lungo** risponde subito e prosegue in background ([vedi sot
 
 ### Indirizzo
 
-Il server ascolta su `http://127.0.0.1:8787` (porta cambiabile con `PTA_PORT`). Da fuori ci si arriva solo
+Il server ascolta su `http://127.0.0.1:8787` (porta cambiabile con `PNA_PORT`). Da fuori ci si arriva solo
 attraverso un proxy come Tailscale Funnel (`https://<mac>.<tailnet>.ts.net`). Tutti i percorsi qui sotto sono
 relativi a quell'indirizzo.
 
 ### Login (solo se c'è un codice di accesso)
 
-Il codice di accesso è **facoltativo** e si attiva avviando il server con `PTA_CODE`.
+Il codice di accesso è **facoltativo** e si attiva avviando il server con `PNA_CODE`.
 
 - **Senza codice** (default, e quello del lanciatore in locale): niente login, ogni chiamata funziona subito.
   In cambio il server risponde **solo a richieste indirizzate a questo computer** (`127.0.0.1`, `localhost`,
   `::1`): tutte le altre ricevono **403** con la spiegazione. Così non si arriva al gioco da Internet né da un
   sito esterno aperto nel browser. `GET /api/health` dice `"login": false`.
-- **Con codice** (`PTA_CODE=...`, necessario per giocare da altri dispositivi):
+- **Con codice** (`PNA_CODE=...`, necessario per giocare da altri dispositivi):
   1. `POST /api/login` con `{"code": "<codice>"}`.
-  2. La risposta imposta il cookie `pta` (HttpOnly, SameSite=Strict, valido 7 giorni; `Secure` quando si arriva
+  2. La risposta imposta il cookie `pna` (HttpOnly, SameSite=Strict, valido 7 giorni; `Secure` quando si arriva
      in HTTPS). Il browser lo rimanda da solo; con curl serve un cookie jar (`-c` / `-b`).
   3. Ogni altro endpoint `/api/...` senza cookie valido risponde **401** (tranne `GET /api/health`).
 
@@ -133,24 +133,24 @@ I messaggi di `error` sono **in italiano e scritti per il giocatore**: si posson
 
 | Codice | Quando | Cosa fare |
 |---|---|---|
-| 400 | dati non validi (IP, maschera, nome, porta inesistente, dispositivo del tipo sbagliato…) oppure IOS ha rifiutato il comando | mostrare `error` al giocatore |
+| 400 | dati non validi (IP, maschera, nome, porta inesistente, dispositivo del tipo sbagliato…) oppure la console ha rifiutato il comando | mostrare `error` al giocatore |
 | 401 | *con codice*: manca il login o il server è stato riavviato | rifare `POST /api/login` |
 | 403 | *con codice*: codice sbagliato. *Senza codice*: richiesta non indirizzata a questo computer | – / usare `http://127.0.0.1:<porta>` |
-| 409 | Packet Tracer è occupato da più di 3 minuti, oppure c'è già un altro lavoro lungo in corso | riprovare tra poco |
+| 409 | la rete è occupata da più di 3 minuti, oppure c'è già un altro lavoro lungo in corso | riprovare tra poco |
 | 429 | troppi codici sbagliati (8 dallo stesso indirizzo o 40 in tutto in 5 minuti) | aspettare qualche minuto |
-| 502 | Packet Tracer non ha risposto o ha dato errore (estensione chiusa, finestra modale aperta…) | controllare PT, riprovare |
+| 502 | la rete non ha fatto quello che si chiedeva per un motivo interno (un programma di rete non è partito…) | controllare `docker compose logs`, riprovare |
 
 ### Una cosa alla volta
 
-Packet Tracer esegue un comando per volta, quindi anche il server. Se arriva un'azione mentre un'altra è in
-corso, **va in coda**: il server la esegue appena PT si libera, in ordine di arrivo, e solo allora risponde
+La rete esegue un'operazione per volta. Se arriva un'azione mentre un'altra è in
+corso, **va in coda**: il server la esegue appena la rete si libera, in ordine di arrivo, e solo allora risponde
 (una richiesta può quindi durare quanto le operazioni che ha davanti). Se l'attesa supera 3 minuti
 (`CODA_S` in `server.py`) risponde **409** con il motivo. Il client può guardare `busy` nello Stato per
 avvisare il giocatore che il suo comando è in coda. Le letture (`GET /api/state`) non
-vengono mai bloccate: se PT è occupato restituiscono l'ultima fotografia disponibile (`snap_age` dice quanto
+vengono mai bloccate: se la rete è occupata restituiscono l'ultima fotografia disponibile (`snap_age` dice quanto
 è vecchia).
 
-C'è **un solo Packet Tracer e una sola partita**: tutti i client collegati vedono e modificano la stessa rete e
+C'è **una sola rete e una sola partita**: tutti i client collegati vedono e modificano la stessa rete e
 lo stesso punteggio.
 
 ### Operazioni lunghe: i lavori
@@ -176,11 +176,11 @@ ridisegna e basta.
 | Campo | Tipo | Significato |
 |---|---|---|
 | `ok` | bool | sempre `true` |
-| `pt` | oggetto | collegamento a Packet Tracer: `{"ok": bool, "status": "connesso"}` o il motivo dell'errore |
-| `topology` | [Topologia](#topologia) | dispositivi e cavi letti da Packet Tracer, più `roles` (dispositivo → ruolo mostrato, es. `"cloud"`) |
+| `rete` | oggetto | stato della rete: `{"ok": bool, "status": "rete vera (Mininet)"}`, oppure `"rete simulata (…)"` con il motivo |
+| `topology` | [Topologia](#topologia) | dispositivi e cavi della rete, più `roles` (dispositivo → ruolo mostrato, es. `"cloud"`) |
 | `firewall` | oggetto | firewall → regole del giocatore (come le ha mandate a `firewall/rules`, normalizzate) |
 | `snap_age` | numero | secondi trascorsi dall'ultima lettura della topologia |
-| `busy` | bool | `true` se PT sta eseguendo qualcosa (un'azione andrebbe in coda) |
+| `busy` | bool | `true` se la rete sta eseguendo qualcosa (un'azione andrebbe in coda) |
 | `job` | [Lavoro](#lavoro-job) o `null` | l'ultimo lavoro lungo, in corso o finito |
 | `score` | intero | punti totali della partita |
 | `mode` | `"academy"` \| `"rescue"` | modalità mostrata |
@@ -195,30 +195,28 @@ ridisegna e basta.
 ```json
 {
   "devices": [ /* Dispositivo */ ],
-  "links":   [ { "a": "R1", "pa": "GigabitEthernet0/0", "b": "SW1", "pb": "GigabitEthernet0/1", "cable": "8100" } ]
+  "links":   [ { "a": "R1", "pa": "GigabitEthernet0/0", "b": "SW1", "pb": "GigabitEthernet0/1", "cable": "copper" } ]
 }
 ```
 
 **Cavo** (`links[]`): collega la porta `pa` del dispositivo `a` alla porta `pb` del dispositivo `b`.
-`cable` è il tipo di cavo di Packet Tracer: `"8100"` dritto, `"8101"` incrociato (altri valori sono possibili
-se il cavo è stato messo a mano in PT).
+`cable` è il tipo di cavo: oggi sempre `"copper"` (rame).
 
 **Dispositivo** (`devices[]`):
 
 | Campo | Tipo | Significato |
 |---|---|---|
 | `name` | stringa | nome univoco, es. `R1`, `PC3` |
-| `kind` | stringa | `router`, `switch`, `pc`, `server` oppure `other` (dispositivi che il gioco non gestisce) |
-| `model` | stringa | modello PT, es. `2911`, `2960-24TT`, `PC-PT`, `Server-PT` |
-| `type` | intero | codice di tipo di PT (0 router, 1 switch, 8 PC, 9 server, 16 switch multilayer) |
-| `x`, `y` | interi | posizione sul tavolo di PT (angolo in alto a sinistra dell'icona, che è circa 50×40) |
+| `kind` | stringa | `router`, `switch`, `pc`, `server` o `firewall` |
+| `model` | stringa | nome del tipo da mostrare: `Router`, `Switch`, `PC`, `Server`, `Firewall` |
+| `x`, `y` | interi | posizione sul tavolo (angolo in alto a sinistra dell'icona, che è circa 50×40) |
 | `power` | bool | acceso |
-| `ports` | lista di [Porta](#porta) | porte di rete (Bluetooth, Wireless e Vlan esclusi) |
+| `ports` | lista di [Porta](#porta) | porte di rete (sui router anche le sottointerfacce, es. `GigabitEthernet0/0.10`) |
 | `gw` | stringa | *solo PC e server*: gateway predefinito (`"0.0.0.0"` = nessuno) |
 | `dhcp` | bool | *solo PC e server*: `true` se prende l'indirizzo via DHCP |
-| `routes` | lista | *solo router*: tabella di routing, `{"net", "mask", "via", "port", "proto"}`. `proto` è la lettera IOS: `C` collegata, `L` locale, `S` statica, `O` OSPF, `D` EIGRP, `R` RIP |
+| `routes` | lista | *solo router*: tabella di routing, `{"net", "mask", "via", "port", "proto"}`. `proto` è la lettera della console: `C` collegata, `S` statica, `O` OSPF |
 | `pools` | lista | *solo router*: pool DHCP, `{"name", "net", "mask", "gw"}` |
-| `acls` | lista | *solo router*: ACL definite, `{"id", "extended", "rules"}`; `rules` sono le righe IOS così come le mostra il router (`"deny tcp 192.168.1.0 0.0.0.255 host 192.168.0.3 eq www"`) |
+| `acls` | lista | *solo router*: ACL definite, `{"id", "extended", "rules"}`; `rules` sono le righe così come le mostra la console (`"deny tcp 192.168.1.0 0.0.0.255 host 192.168.0.3 eq www"`) |
 
 #### Porta
 
@@ -275,10 +273,10 @@ Come la pagina colora i pallini dei cavi: rosso se `on` è `false`, verde se `up
   e allora `finished` è `true`).
 - `topology`, `plan`, `tips`: la topologia da raggiungere (testo), il piano di indirizzamento (righe di celle, la
   prima è l'intestazione) e i consigli del collega senior, dal più vago al più preciso (il client li fa chiedere a
-  Jody, in ufficio). `has_network`: la missione ha un tavolo di partenza (un file .pkt o il tavolo vuoto).
+  Jody, in ufficio). `has_network`: la missione ha un tavolo di partenza (una topologia o il tavolo vuoto).
 - `needs_setup`: quel tavolo di partenza non è ancora stato preparato. Il client chiama allora
   `POST /api/academy/network` con `{"start": true}` prima che il giocatore cominci (così, per esempio, il giorno 1
-  parte davvero dal tavolo vuoto anche se in Packet Tracer era rimasta un'altra rete).
+  parte davvero dal tavolo vuoto anche se sul tavolo era rimasta un'altra rete).
 - `tutorial`: missione guidata. Quando è `false` il client non mostra `hint` e `msg` dei passi, e il messaggio di
   una «Verifica» non riuscita dice solo quale condizione manca, non perché.
 - `steps[].kind` dice come si completa il passo: `controllo` (si spunta da solo, ricalcolato a ogni lettura della
@@ -380,8 +378,8 @@ per esteso; le maschere si possono scrivere `255.255.255.0`, `24` o `/24`.
 
 #### `GET /api/health`
 
-Senza login. Dice solo se il server è acceso, se chiede un codice e se vede Packet Tracer, senza dati della rete
-o della partita: `{"ok": true, "app": "pt-academy", "login": false, "pt": {"ok": true, "status": "connesso"},
+Senza login. Dice solo se il server è acceso, se chiede un codice e se la rete è pronta, senza dati della rete
+o della partita: `{"ok": true, "app": "penguin-inc", "login": false, "rete": {"ok": true, "status": "rete vera (Mininet)"},
 "contenuti": {"ok": true, "errore": ""}}`. `contenuti` dice se i YAML del pacchetto di gioco sono validi. Lo usa
 il lanciatore per sapere quando il server è pronto; va bene anche per un monitoraggio.
 
@@ -389,7 +387,7 @@ il lanciatore per sapere quando il server è pronto; va bene anche per un monito
 
 Senza login. Testi e impostazioni dell'interfaccia, letti dal pacchetto di gioco: `{"ok": true, "testi":
 {…interfaccia.yaml…, "storia": {…storia.yaml…}}, "impostazioni": {"dispositivi", "interfaccia", "punteggio"},
-"collaudo": false, "errore_contenuti": ""}`. `collaudo` è `true` se il server è avviato con `PTA_COLLAUDO=1`:
+"collaudo": false, "errore_contenuti": ""}`. `collaudo` è `true` se il server è avviato con `PNA_COLLAUDO=1`:
 il client mostra allora i cheat per il debug. Non contiene dati della partita né le soluzioni scritte in `pronto-soccorso.yaml`. Un
 client lo legge all'avvio, prima del login.
 
@@ -405,18 +403,18 @@ Entra nel gioco.
 |---|---|---|---|
 | `code` | stringa | obbl. | codice di accesso |
 
-Risposta: `{"ok": true}` più il cookie `pta`. Errori: 403 codice sbagliato (risponde dopo 1 secondo apposta),
+Risposta: `{"ok": true}` più il cookie `pna`. Errori: 403 codice sbagliato (risponde dopo 1 secondo apposta),
 429 troppi tentativi. È l'unico endpoint che non richiede il cookie e non controlla il `Content-Type`.
 Senza codice di accesso risponde sempre `{"ok": true}`.
 
 #### `GET /api/state`
 
-Restituisce lo [Stato](#loggetto-stato). Se la fotografia della rete ha più di 3 secondi e PT è libero, prima la
-rilegge da Packet Tracer (circa 1 secondo). Vede anche le modifiche fatte a mano in Packet Tracer.
+Restituisce lo [Stato](#loggetto-stato). Se la fotografia della rete ha più di 3 secondi e la rete è libera, prima la
+rinnova dal modello (istantaneo).
 
 #### `POST /api/mode`
 
-Cambia la modalità mostrata. Non tocca Packet Tracer.
+Cambia la modalità mostrata. Non tocca la rete.
 
 | Campo | Tipo | | Significato |
 |---|---|---|---|
@@ -428,19 +426,20 @@ Risposta: Stato.
 
 ### Dispositivi e cavi
 
-Tutte rispondono con lo Stato aggiornato. Il gioco gestisce quattro tipi di dispositivo, ognuno con un modello
-fisso di Packet Tracer:
+Tutte rispondono con lo Stato aggiornato. Il gioco gestisce questi tipi di dispositivo (in `backend/rete/modello.py`):
 
-| `kind` | Modello PT | Nomi generati | Porte |
-|---|---|---|---|
-| `router` | 2911 | R1, R2… | GigabitEthernet0/0 – 0/2 |
-| `switch` | 2960-24TT | SW1, SW2… | FastEthernet0/1 – 0/24, GigabitEthernet0/1 – 0/2 |
-| `pc` | PC-PT | PC1, PC2… | FastEthernet0 |
-| `server` | Server-PT | SRV1, SRV2… | FastEthernet0 |
+| `kind` | Nomi generati | Porte |
+|---|---|---|
+| `router` | R1, R2… | GigabitEthernet0/0 – 0/2 (nascono spente) |
+| `switch` | SW1, SW2… | FastEthernet0/1 – 0/24, GigabitEthernet0/1 – 0/2 |
+| `pc` | PC1, PC2… | FastEthernet0 |
+| `server` | SRV1, SRV2… | FastEthernet0 (web, FTP e posta accesi) |
+| `firewall` | FW1, FW2… | GigabitEthernet1/1 – 1/8 (nascono spente) |
+| `cloud` | CLOUD1… | un `server` con il ruolo `"cloud"` |
 
 #### `POST /api/device/add`
 
-Crea un dispositivo in Packet Tracer con il primo nome libero.
+Crea un dispositivo con il primo nome libero.
 
 | Campo | Tipo | | Significato |
 |---|---|---|---|
@@ -476,8 +475,7 @@ Risposta: Stato + **`selected`**: il nuovo nome.
 #### `POST /api/link`
 
 Collega due dispositivi. Le porte, se non indicate, le sceglie il server: la prima libera, preferendo le
-Gigabit per i collegamenti tra router e switch e le FastEthernet per i PC. Il tipo di cavo (dritto o
-incrociato) lo sceglie `packet-tracer-mcp` in base ai due tipi di dispositivo.
+Gigabit per i collegamenti tra router e switch e le FastEthernet per i PC.
 
 | Campo | Tipo | | Significato |
 |---|---|---|---|
@@ -501,9 +499,9 @@ Stacca il cavo collegato a una porta (si può indicare indifferentemente l'una o
 ### Configurazione
 
 Tutte rispondono con lo Stato aggiornato. Gli endpoint dei router e degli switch traducono la richiesta in
-comandi IOS veri (indicati in ogni sezione) e li scrivono nella console del dispositivo: chi apre la CLI in
-Packet Tracer li vede. Se IOS rifiuta una riga la risposta è 400 con la riga incriminata. Alla fine
-salvano la configurazione (`write memory`), così uno spegnimento non la cancella.
+comandi della console (indicati in ogni sezione) e li scrivono nella console del dispositivo, come farebbe una
+persona: `show running-config` li mostra. Se la console rifiuta una riga la risposta è 400 con la riga
+incriminata. La configurazione resta anche dopo uno spegnimento.
 
 **Dispositivi protetti da password.** Se la console chiede utente e password (dopo
 [`device/harden`](#post-apideviceharden) con degli utenti, o se il dispositivo era già protetto),
@@ -512,7 +510,7 @@ l'istruzione di usare [`/api/device/login`](#post-apidevicelogin).
 
 #### `POST /api/host/ip`
 
-Configura l'indirizzo di un PC o di un server (Desktop → IP Configuration).
+Configura l'indirizzo di un PC o di un server.
 
 | Campo | Tipo | | Significato |
 |---|---|---|---|
@@ -521,10 +519,9 @@ Configura l'indirizzo di un PC o di un server (Desktop → IP Configuration).
 | `ip` | stringa | obbl. se statico | indirizzo |
 | `mask` | stringa | | maschera (default `255.255.255.0`) |
 | `gateway` | stringa | | gateway; vuoto = nessun gateway |
-| `dns` | stringa | | server DNS; vuoto = lascia quello che c'è (PT non lo fa rileggere) |
+| `dns` | stringa | | server DNS; vuoto = lascia quello che c'è |
 
-Con `"dhcp"` il server fa avanzare il tempo di PT (così una porta appena cablata è già pronta), chiede
-l'indirizzo e, se non arriva, riprova una volta. Risposta: Stato + **`toast`**, un messaggio con l'esito
+Con `"dhcp"` il PC chiede subito l'indirizzo (nella rete vera con `udhcpc`, al `dnsmasq` del router). Risposta: Stato + **`toast`**, un messaggio con l'esito
 (`"PC4 ha ricevuto 192.168.20.2/24"` oppure il suggerimento di controllare il server DHCP).
 
 #### `POST /api/router/iface`
@@ -540,7 +537,7 @@ IP e stato di una porta del router.
 | `clear_ip` | bool | | con `ip` vuoto, toglie l'indirizzo |
 | `on` | bool | | `true` (default) accende, `false` spegne |
 
-IOS: `interface <port>` · `ip address <ip> <mask>` (o `no ip address`) · `no shutdown` / `shutdown`.
+Console: `interface <port>` · `ip address <ip> <mask>` (o `no ip address`) · `no shutdown` / `shutdown`.
 
 #### `POST /api/router/dhcp`
 
@@ -556,7 +553,7 @@ Crea un pool DHCP sul router; l'indirizzo del gateway viene escluso dal pool.
 | `dns` | stringa | | server DNS |
 | `exclude_from`, `exclude_to` | stringa | | indirizzi da non dare via (es. quelli fissi dei server); `exclude_to` vuoto = uno solo |
 
-IOS: `ip dhcp excluded-address <gateway>` [· `ip dhcp excluded-address <da> <a>`] · `ip dhcp pool <pool>` · `network <network> <mask>` ·
+Console: `ip dhcp excluded-address <gateway>` [· `ip dhcp excluded-address <da> <a>`] · `ip dhcp pool <pool>` · `network <network> <mask>` ·
 `default-router <gateway>` · `dns-server <dns>`.
 
 #### `POST /api/router/route`
@@ -570,7 +567,7 @@ Aggiunge o toglie una rotta statica.
 | `via` | stringa | obbl. | next hop (IP del router vicino) |
 | `remove` | bool | | `true` toglie la rotta |
 
-IOS: `ip route <network> <mask> <via>` (con `no` davanti per toglierla).
+Console: `ip route <network> <mask> <via>` (con `no` davanti per toglierla).
 
 #### `POST /api/port/state`
 
@@ -592,7 +589,7 @@ Mette una porta dello switch in modalità access nella VLAN indicata (la VLAN vi
 | `port` | stringa | obbl. | porta |
 | `vlan` | intero | obbl. | 1–1005 |
 
-IOS: `vlan <vlan>` · `interface <port>` · `switchport mode access` · `switchport access vlan <vlan>`.
+Console: `vlan <vlan>` · `interface <port>` · `switchport mode access` · `switchport access vlan <vlan>`.
 
 ---
 
@@ -600,7 +597,7 @@ IOS: `vlan <vlan>` · `interface <port>` · `switchport mode access` · `switchp
 
 #### `POST /api/cli`
 
-Scrive comandi IOS nella console di un router o di uno switch, come farebbe una persona: serve per tutto quello
+Scrive comandi nella console di un router, di uno switch o di un firewall, come farebbe una persona: serve per tutto quello
 che i form non coprono (OSPF, sottointerfacce, `show …`).
 
 | Campo | Tipo | | Significato |
@@ -609,22 +606,22 @@ che i form non coprono (OSPF, sottointerfacce, `show …`).
 | `commands` | lista di stringhe o stringa | obbl. | da 1 a 15 righe di testo semplice, massimo 160 caratteri ciascuna (una stringa viene divisa per righe) |
 
 La console parte dal punto in cui era rimasta: per configurare servono `enable` e `configure terminal`.
-Come una console vera **non salva da sola**: per tenere le modifiche dopo uno spegnimento serve `write memory`.
-Se il dispositivo è protetto, il server fa prima il login (vedi sopra).
-Risposta: Stato + **`console`**: il testo restituito, con ogni comando marcato `[ok]`, `[ERROR]`,
-`[UNKNOWN COMMAND]`, `[WAITING FOR ANSWER]` o `[TIMEOUT]`. Un comando rifiutato da IOS **non** dà errore HTTP:
-l'esito è nel testo, come in una console vera.
+I comandi si possono abbreviare (`conf t`, `int g0/0`, `no sh`); `write memory` è accettato ma non serve, la
+configurazione resta comunque. Se il dispositivo è protetto, il server fa prima il login (vedi sopra).
+Risposta: Stato + **`console`**: la trascrizione, con il prompt prima di ogni comando e i messaggi della console
+(`% Invalid input detected at '^' marker.` per una riga che non si capisce). Un comando rifiutato **non** dà
+errore HTTP: l'esito è nel testo, come in una console vera. L'interprete è in `backend/rete/console.py`.
 
 #### `POST /api/host/cmd`
 
-Esegue un comando nel prompt di un PC o di un server (Desktop → Command Prompt).
+Esegue un comando nel prompt di un PC o di un server.
 
 | Campo | Tipo | | Significato |
 |---|---|---|---|
 | `name` | stringa | obbl. | PC o server |
 | `command` | stringa | obbl. | inizia con `ping`, `ipconfig`, `tracert`, `arp` o `nslookup`; poi solo lettere, numeri, `.`, `/`, `-` e spazi (max 60) |
 
-Risposta: Stato + **`console`**: l'output. Un ping che fallisce impiega circa 15 secondi.
+Risposta: Stato + **`console`**: l'output (`ping` e `tracert` sono quelli di Linux, nel namespace del dispositivo). Un ping che fallisce impiega circa 2 secondi.
 
 #### `POST /api/ping`
 
@@ -635,9 +632,8 @@ Ping vero con esito già interpretato: comodo per un client che vuole solo saper
 | `from` | stringa | obbl. | PC, server o router da cui parte |
 | `ip` | stringa | obbl. | destinazione |
 
-Risposta: Stato + **`ping`**: `{"ok": bool, "out": "<output di Packet Tracer>"}`. `ok` è `true` se sono
-tornate almeno 2 risposte su 4 (o il 40% da un router): il primo pacchetto si perde spesso per l'ARP. Se
-fallisce, il server riprova una volta.
+Risposta: Stato + **`ping`**: `{"ok": bool, "out": "<output di ping>"}`. `ok` è `true` se sono
+tornate almeno 2 risposte su 4. Nella rete simulata `out` è un riassunto calcolato sul modello.
 
 ---
 
@@ -657,7 +653,7 @@ giocatore la chiude con questi endpoint; la verifica controlla che il traffico l
 #### `POST /api/router/acl`
 
 Crea un'ACL e, se indicata una porta, la applica. Se un'ACL con lo stesso nome esiste già viene
-**sostituita** (IOS da solo accoderebbe le regole nuove a quelle vecchie). Ogni riga è verificata.
+**sostituita** (la console da sola accoderebbe le regole nuove a quelle vecchie). Ogni riga è verificata.
 
 | Campo | Tipo | | Significato |
 |---|---|---|---|
@@ -686,7 +682,7 @@ Esempio: dalla LAN 192.168.1.0/24 niente web verso il server, tutto il resto sì
            {"action": "permit", "protocol": "ip"}]}
 ```
 
-Packet Tracer: `pt_apply_acl`. Lo Stato mostra l'ACL in `devices[].acls` e la porta in `acl_in`/`acl_out`.
+Console: `access-list …` o `ip access-list … ` e `ip access-group`. Lo Stato mostra l'ACL in `devices[].acls` e la porta in `acl_in`/`acl_out`.
 
 #### `POST /api/router/acl/remove`
 
@@ -712,9 +708,9 @@ Risposta: Stato + **`web`**: `{"ok": bool, "text": "testo della pagina"}`; se no
 
 #### `POST /api/trace`
 
-Segue un ping passo per passo (modalità Simulation di PT) e dice **dove e perché** viene scartato. Prima e
-dopo svuota la simulazione e alla fine rimette PT in Realtime, quindi non lascia tracce. Se il primo ping
-muore aspettando l'ARP (normale verso un indirizzo nuovo) lo ripete da solo.
+Segue un ping passo per passo e dice **dove e perché** viene scartato. Il percorso è calcolato sul modello
+della rete (`backend/rete/percorso.py`: cavi, VLAN, rotte, ACL, zone del firewall); nella rete vera un ping vero
+conferma se arriva davvero.
 
 | Campo | Tipo | | Significato |
 |---|---|---|---|
@@ -727,23 +723,23 @@ Risposta: Stato + **`trace`**:
 {
   "from": "PC2", "to": "SRV1", "delivered": false,
   "blocked_by": { "device": "R1",
-    "reason": "The packet matches the criteria of the following statement: deny icmp 192.168.1.0 0.0.0.255 host 192.168.0.3. The packet is denied and dropped." },
+    "reason": "l'ACL 101 (in ingresso su GigabitEthernet0/0) lo scarta: «deny icmp 192.168.1.0 0.0.0.255 host 192.168.0.3»" },
   "hops": [
-    { "leg": "andata", "device": "PC2", "in": null, "out": "FastEthernet0", "status": "sent", "note": "FastEthernet0 sends out the frame." },
-    { "leg": "andata", "device": "SW2", "in": "FastEthernet0/1", "out": "GigabitEthernet0/1", "status": "sent", "note": "…" },
-    { "leg": "andata", "device": "R2",  "in": "GigabitEthernet0/1", "out": "GigabitEthernet0/0", "status": "sent", "note": "…" },
-    { "leg": "andata", "device": "R1",  "in": "GigabitEthernet0/0", "out": null, "status": "dropped", "note": "…" }
+    { "leg": "andata", "device": "PC2", "in": null, "out": "FastEthernet0", "status": "sent", "note": "" },
+    { "leg": "andata", "device": "SW2", "in": "FastEthernet0/1", "out": "GigabitEthernet0/1", "status": "sent", "note": "" },
+    { "leg": "andata", "device": "R2",  "in": "GigabitEthernet0/1", "out": "GigabitEthernet0/0", "status": "sent", "note": "" },
+    { "leg": "andata", "device": "R1",  "in": "GigabitEthernet0/0", "out": null, "status": "dropped", "note": "l'ACL 101 … lo scarta" }
   ]
 }
 ```
 
 - `delivered`: la risposta è tornata al mittente.
-- `blocked_by`: il punto in cui il pacchetto è stato scartato, con il motivo **scritto da Packet Tracer in
-  inglese**. Per un'ACL contiene la riga esatta che l'ha bloccato: ottimo come indizio.
+- `blocked_by`: il punto in cui il pacchetto è stato scartato, con il motivo in italiano. Per un'ACL o un
+  firewall contiene la riga esatta che l'ha bloccato: ottimo come indizio.
 - `hops`: il giro del ping, un passo per dispositivo: `leg` è `"andata"` fino alla destinazione, poi
-  `"ritorno"`; `status` è `sent`, `accepted` (arrivato) o `dropped` (scartato); `note` è l'ultima decisione di PT.
+  `"ritorno"`; `status` è `sent`, `accepted` (arrivato) o `dropped` (scartato); `note` spiega uno scarto.
 
-Dura 10–30 secondi.
+Dura meno di un secondo (nella rete vera più il ping di conferma).
 
 #### `POST /api/switch/port-security`
 
@@ -758,7 +754,7 @@ violazione.
 | `violation` | stringa | | cosa succede alla violazione: `shutdown` (default, la porta si spegne), `restrict` (scarta e registra), `protect` (scarta in silenzio) |
 | `sticky` | bool | | `true` (default): impara da sola i dispositivi ammessi |
 
-IOS: `switchport port-security` · `maximum` · `violation` · `mac-address sticky`. Lo Stato mostra `psec: true` sulla porta.
+Console: `switchport port-security` · `maximum` · `violation` · `mac-address sticky`. Lo Stato mostra `psec: true` sulla porta. Oggi la regola è registrata nella configurazione ma la rete vera non conta i dispositivi sulla porta.
 
 #### `POST /api/device/harden`
 
@@ -778,8 +774,9 @@ credenziali che passano da qui (l'utente con il privilegio più alto e la passwo
 fa il login da solo. Le password restano dentro la simulazione: sono salvate solo nel file della partita sul
 computer del server e **non vengono mai restituite** dall'API né scritte nel diario.
 
-Packet Tracer: `pt_apply_hardening`; la parte SSH (hostname, dominio, chiavi RSA, `ip ssh version 2`, linee vty)
-la scrive l'endpoint stesso con la sintassi che Packet Tracer accetta.
+Console: `enable secret`, `username … privilege … secret …`, `line con 0` / `line vty 0 4` con `login local`,
+`banner motd`, `service password-encryption`; con `ssh` anche hostname, dominio, chiavi RSA, `ip ssh version 2`
+e `transport input ssh`.
 
 #### `POST /api/device/login`
 
@@ -802,7 +799,7 @@ utente si dice solo come è salvata.
 
 Risposta: Stato + **`users`**: `[{"username": "gabbiano", "privilege": 15, "storage": "reversibile"}]`.
 `storage` è `"chiaro"` (`password 0`), `"reversibile"` (`password 7`: nascosta ma decifrabile) o `"cifrata"`
-(`secret`). IOS: `show running-config | include username` (con il login, se la console è protetta).
+(`secret`).
 
 #### `POST /api/device/users/remove`
 
@@ -835,10 +832,8 @@ Risposta: Stato + **`audit`**:
 
 Codici possibili: `NO_ENABLE_SECRET`, `ENABLE_SECRET_REVERSIBLE`, `ENABLE_SECRET_WEAK_ALGO`,
 `ENABLE_PASSWORD_PRESENT`, `USER_CREDENTIAL_REVERSIBLE`, `USER_CREDENTIAL_WEAK_ALGO`, `NO_LOCAL_USERS`,
-`NO_SERVICE_PASSWORD_ENCRYPTION`, `NO_BANNER_MOTD`, `CONFIG_REGISTER_BYPASS`. `message` è in italiano; per le falle
-sugli utenti contiene anche il nome dell'utente.
-In Packet Tracer `enable secret` è salvato con MD5, che l'audit segnala come algoritmo debole (`medium`):
-per una sfida conviene chiedere «nessuna falla `high`» invece di `secure: true`.
+`NO_SERVICE_PASSWORD_ENCRYPTION`, `NO_BANNER_MOTD`. `message` è in italiano; per le falle sugli utenti contiene
+anche il nome dell'utente. L'audit legge la configurazione del modello (`audit()` in `backend/rete/console.py`).
 
 #### `POST /api/device/power`
 
@@ -849,8 +844,8 @@ Spegne o accende un dispositivo: simula un guasto o un attacco per vedere se la 
 | `name` | stringa | obbl. | dispositivo |
 | `on` | bool | obbl. | `false` spegne, `true` riaccende |
 
-Alla riaccensione un router o switch riparte dalla configurazione **salvata**: quella dei form lo è sempre,
-quella scritta a mano in `cli` solo se il giocatore ha fatto `write memory`. Lo Stato mostra `power`.
+Alla riaccensione un router o switch riparte con la sua configurazione (nel gioco resta sempre). Lo Stato
+mostra `power`.
 
 #### `POST /api/router/hsrp`
 
@@ -866,14 +861,14 @@ gateway; se il router attivo si spegne, l'altro prende il suo posto.
 | `priority` | intero | | 0–255 (default 100): il più alto è il router attivo |
 | `preempt` | bool | | `true` (default): quando torna, il router con priorità più alta riprende il comando |
 
-Packet Tracer: `pt_apply_hsrp` (versione 2, provata dal vivo). Controllo: `cli` con `show standby brief`.
+Console: `standby version 2`, `standby <gruppo> ip|priority|preempt`. Nella rete vera l'IP virtuale sta sul router attivo (priorità più alta tra quelli accesi). Controllo: `cli` con `show standby`.
 
 #### Firewall, servizi, scansione, sniffer e limiti
 
-Il **firewall** è un Cisco ASA 5506-X (`kind: "firewall"`, si aggiunge con `device/add` e `kind: "firewall"`).
-Nella topologia ha in più **`fw`**: `{"zones": [{"port", "nameif", "level"}], "acls": {nome: [righe]},
-"groups": {zona: ACL}}`, letto dalla sua configurazione. Un **cloud** (`kind: "cloud"` in `device/add`) è un
-Server-PT con il ruolo `"cloud"` in `topology.roles`: un servizio cloud fittizio, che si usa come un server.
+Il **firewall** (`kind: "firewall"`, si aggiunge con `device/add` e `kind: "firewall"`) ha zone con livelli di
+sicurezza; nella rete vera è un namespace con `nftables` senza stato. Nella topologia ha in più **`fw`**:
+`{"zones": [{"port", "nameif", "level"}], "acls": {nome: [righe]}, "groups": {zona: ACL}, "routes": [...]}`.
+Un **cloud** (`kind: "cloud"` in `device/add`) è un server con il ruolo `"cloud"` in `topology.roles`: un servizio cloud fittizio, che si usa come un server.
 
 `POST /api/firewall/zone` — `{"name", "port", "zone", "level"?, "ip", "mask"?}` oppure `{"name", "port", "clear":
 true}`. La porta diventa la zona `zone` (una parola minuscola) con livello di sicurezza `level` 0-100 (default
@@ -883,49 +878,44 @@ inside 100, dmz 50, outside 0). Le regole già salvate vengono ricompilate.
 "action": "permit"|"deny", "protocol"?: ip|tcp|udp|icmp, "port"?, "dest"?, "source"?}`; `from`/`to` sono zone,
 `dest`/`source` vuoti = tutta la zona, oppure `any`, un IP, una rete `a.b.c.d/nn`. Le regole sono le eccezioni
 al comportamento di base (una zona apre connessioni verso le zone con livello più basso, mai il contrario) e le
-risposte tornano da sole: `backend/firewall.py` le compila in un'ACL `PTA_<zona>` per zona (vedi
+risposte tornano da sole: `backend/firewall.py` le compila in un'access-list `PNA_<zona>` per zona (vedi
 ARCHITETTURA.md). Risposta: Stato + **`acl`** `{zona: righe}`.
 
-`POST /api/firewall/route` — `{"name", "network", "mask", "via", "remove"?}`: rotta statica dell'ASA
+`POST /api/firewall/route` — `{"name", "network", "mask", "via", "remove"?}`: rotta statica del firewall
 (`route <zona> <rete> <maschera> <via>`; la zona è quella della porta nella cui rete sta `via`). Una zona
 comprende anche le reti delle sue rotte: con il firewall tra due router, «tutta la zona» vale anche per le LAN
 dietro il router di quel lato. Le rotte sono in `topology.devices[].fw.routes` `[{"zone", "net", "mask", "via"}]`.
 
 `POST /api/server/dns` — `{"name", "on"?, "add"?: [{"name", "ip"}], "remove"?: [nomi]}`: il servizio DNS di un
-Server-PT e i suoi record A. I record creati dal gioco sono nello Stato, in **`dns`** `{server: {"on", "records":
-{nome: ip}}}` (Packet Tracer non li fa rileggere). Risposta: Stato + **`dns`** del server.
+server e i suoi record A (nella rete vera: `dnsmasq` sul server). I record sono anche nello Stato, in **`dns`**
+`{server: {"on", "records": {nome: ip}}}`. Risposta: Stato + **`dns`** del server.
 
 `POST /api/server/services` — `{"name"}` → Stato + **`services`**: `{"http", "https", "ftp", "smtp", "pop3": bool,
 "ftp_users", "domain"}` (porte 80, 443, 21, 25, 110). `POST /api/server/service` — `{"name", "service":
-http|https|ftp|email, "on": bool, "domain"?}`. SSH non è un servizio di Server-PT: è dei router (`device/harden`).
+http|https|ftp|email, "on": bool, "domain"?}`. SSH non è un servizio dei server: è dei router (`device/harden`).
 
 `POST /api/router/ratelimit` — `{"name", "port"?, "kbps"?}`. Con `port` e `kbps` > 0 mette un limite in uscita
 (traffic shaping, `shape average`); `kbps: 0` lo toglie; solo `name` legge. Risposta: Stato + **`limits`**
-`{porta: kbps}`. PT accetta la configurazione ma non ne simula l'effetto sulla velocità. Attenzione: dopo un
-passaggio in Simulation PT lascia bloccata la porta con il limite; il server rimette le policy ogni volta che PT
-torna in Realtime (i limiti attivi sono nello Stato, `limiti_attivi`).
+`{porta: kbps}`. Nella rete vera il limite rallenta davvero il traffico (`tc tbf` sulla porta del router).
 
 `POST /api/scan` (lavoro) — `{"from", "to", "ports"?}`: da un PC/server prova ad aprire una connessione TCP
-(Telnet) su ogni porta (default 21, 22, 23, 25, 80, 110, 443; al massimo 10). Risultato del lavoro: **`scan`**
+su ogni porta (default 21, 22, 23, 25, 80, 110, 443; al massimo 10). Risultato del lavoro: **`scan`**
 `{"from", "target", "ip", "ports": [{"port", "service", "state"}]}`, `state` = `aperta` (risponde), `chiusa`
-(l'host rifiuta), `filtrata` (nessuna risposta: firewall o ACL). Una porta filtrata costa ~14 s.
+(l'host rifiuta), `filtrata` (nessuna risposta: firewall o ACL). Una porta filtrata costa ~3 s.
 
-`POST /api/sniff` (lavoro) — `{"name", "traffic"?: [{"from", "cmd"}]}`: in Simulation fa partire il traffico di
+`POST /api/sniff` (lavoro) — `{"name", "traffic"?: [{"from", "cmd"}]}`: fa partire il traffico di
 fondo del livello in corso (campo `traffico` dei livelli) o della challenge in corso (campo `traffico` delle
 missioni dell'Accademia) più quello chiesto (`ping IP`, `telnet IP porta`,
-`web http://IP`) e registra i pacchetti che passano dal dispositivo. Senza traffico di fondo ogni host fa ping
+`web http://IP`) e registra i pacchetti che passano dal dispositivo (nella rete vera con `tcpdump`). Senza traffico di fondo ogni host fa ping
 al suo gateway. Risultato: **`capture`** `{"device", "frames": [{"n", "src", "src_dev", "dst", "dst_dev",
-"proto", "app", "port", "status"}]}`. Dura pochi secondi; alla fine PT torna in Realtime.
+"proto", "app", "port", "in", "out", "status"}]}`. Dura circa 5 secondi.
 
 #### Cosa (ancora) non si può fare via API
 
-- **Regole del firewall dei PC/server** (Desktop → Firewall): Packet Tracer non le espone. Acceso senza regole
-  non blocca niente (misurato), quindi non c'è un endpoint: le regole vanno preparate a mano nel file della sfida.
-- **WEP/WPA sui client Wi-Fi**: l'API di Packet Tracer va in errore, si fa solo dalla GUI.
-- **VPN**: Server-PT non ha un servizio VPN; una VPN IPsec tra router non ha uno strumento dedicato e non è
-  stata provata (con `cli` si possono scrivere i comandi `crypto`).
-- **Rate limiting vero**: sui 2911 di PT `rate-limit` e `police` non esistono; `shape average` sì, ma PT non
-  ne simula l'effetto.
+- **Firewall sui PC e sui server**: i firewall sono dispositivi a sé, non c'è un firewall personale sugli host.
+- **Wi-Fi**: il gioco ha solo cavi.
+- **VPN**: non c'è un tunnel vero; nel gioco una VPN si rappresenta con la sottorete dove arrivano i dipendenti.
+- **Port-security**: la configurazione si registra, ma la rete vera non blocca i dispositivi in più sulla porta.
 
 ---
 
@@ -949,14 +939,14 @@ Tracer** (sostituisce il tavolo) e il messaggio lo dice.
 
 #### `POST /api/academy/reset`
 
-Lavoro lungo. **Cancella tutti i dispositivi dal tavolo di Packet Tracer** e riporta l'Accademia alla
+Lavoro lungo. **Cancella tutti i dispositivi dal tavolo** e riporta l'Accademia alla
 missione 1 (se la missione 1 ha una rete di partenza, la apre). Il punteggio resta. Body: `{}`.
 
 #### `POST /api/academy/network`
 
-Lavoro lungo. Prepara il tavolo di partenza della missione in corso: apre il suo file .pkt in Packet Tracer, o
+Lavoro lungo. Prepara il tavolo di partenza della missione in corso: carica la sua topologia (`gioco/reti/*.yaml`), o
 svuota il tavolo (`rete: vuota`, o nessuna rete); azzera i suoi passi interattivi e la segna come preparata
-(`needs_setup` diventa `false`). **Sostituisce la rete aperta in PT.** Body: `{"start": true}` per la prima
+(`needs_setup` diventa `false`). **Sostituisce la rete che c'è sul tavolo.** Body: `{"start": true}` per la prima
 preparazione (la chiede il client quando vede `needs_setup`), `{}` per «Ricomincia la challenge»: cambiano solo
 il titolo del lavoro e il messaggio.
 
@@ -964,19 +954,19 @@ il titolo del lavoro e il messaggio.
 
 Gioco. Risponde alla domanda di un passo `domanda` della missione in corso. Body: `{"step": i, "choice": j}`
 (indici da 0). Risposta: Stato + `{"answer": {"correct": bool, "message": "…"}}`: la risposta giusta completa il
-passo e il messaggio è la spiegazione; quella sbagliata no, e si può riprovare. Non tocca Packet Tracer.
+passo e il messaggio è la spiegazione; quella sbagliata no, e si può riprovare. Non tocca la rete.
 
 #### `POST /api/academy/observe`
 
-Azione. Segue nella simulazione di PT il ping di un passo `osserva` (`da` → `a`, scritti nel YAML), come
+Azione. Segue passo per passo il ping di un passo `osserva` (`da` → `a`, scritti nel YAML), come
 `/api/trace`. Body: `{"step": i}`. Risposta: Stato + `{"trace": {…come /api/trace…}, "explanation": "…"}`. Se il
 ping arriva il passo è fatto. Dura 10–30 secondi; 400 se sul tavolo manca uno dei due dispositivi.
 
 #### `POST /api/collaudo/accademia`
 
-**Esiste solo se il server è avviato con `PTA_COLLAUDO=1`** (altrimenti 404). Cheat per il debug: segna come
+**Esiste solo se il server è avviato con `PNA_COLLAUDO=1`** (altrimenti 404). Cheat per il debug: segna come
 completate esattamente le missioni indicate, e tutte le altre tornano da fare. Niente controlli, niente ping,
-niente punti; Packet Tracer non viene toccato. Body: `{"done": ["lan", "server"]}` (lista anche vuota). Errore
+niente punti; la rete non viene toccata. Body: `{"done": ["lan", "server"]}` (lista anche vuota). Errore
 400 se un id non esiste. Risposta: Stato. Lo usa il pannello 🐞 del client (vedi
 [frontend/demo/README.md](../../frontend/demo/README.md#collaudo-cheat-per-il-debug)).
 
@@ -991,7 +981,7 @@ non sono stati usati indizi.
 
 #### `POST /api/rescue/start`
 
-Lavoro lungo (circa un minuto). **Sostituisce la rete aperta in Packet Tracer.**
+Lavoro lungo (circa un minuto). **Sostituisce la rete che c'è sul tavolo.**
 
 | Campo | Tipo | | Significato |
 |---|---|---|---|
@@ -1044,15 +1034,15 @@ Compra l'aiuto di un collega del giorno in corso.
 | `help` | stringa, obbl. | id dell'aiuto (`campaign.current.helps[].id`) |
 
 Toglie il costo dal saldo, esegue le azioni del collega sulla rete (aggiungere e cablare dispositivi,
-configurare una porta, righe IOS…) e restituisce la risposta. Un aiuto già comprato si rilegge gratis.
+configurare una porta, righe della console…) e restituisce la risposta. Un aiuto già comprato si rilegge gratis.
 Se le azioni falliscono il costo viene restituito (le azioni già eseguite restano).
 Risposta: Stato + **`toast`**: la risposta del collega; **`dialog`**: la stessa come battuta (`[{who, name,
 role, icon, text}]`). Errore 400 se l'aiuto non esiste oggi, se il saldo non basta o se l'aiuto vale solo
-durante un livello che non si sta giocando. Se Packet Tracer è occupato l'aiuto va in coda.
+durante un livello che non si sta giocando. Se la rete è occupata l'aiuto va in coda.
 
 #### `POST /api/campaign/reset`
 
-Riporta la campagna al giorno 1 con il saldo iniziale. Body: `{}`. Non tocca Packet Tracer, l'Accademia né il
+Riporta la campagna al giorno 1 con il saldo iniziale. Body: `{}`. Non tocca la rete, l'Accademia né il
 Pronto Soccorso: i giorni le cui attività risultano già fatte si richiudono alla prossima verifica (per
 ripartire davvero da zero c'è anche `academy/reset`).
 
@@ -1061,7 +1051,7 @@ ripartire davvero da zero c'è anche `academy/reset`).
 ### curl
 
 ```bash
-# 1. login (salva il cookie in jar.txt). Serve solo se il server ha un codice (PTA_CODE); senza, è innocuo
+# 1. login (salva il cookie in jar.txt). Serve solo se il server ha un codice (PNA_CODE); senza, è innocuo
 curl -s -c jar.txt -H 'Content-Type: application/json' \
      -d '{"code":"246810"}' http://127.0.0.1:8787/api/login
 
@@ -1113,4 +1103,4 @@ console.log((await api("/api/state")).rescue.current.ticket);
 ```
 
 Un client servito da **un altro dominio** non può usare il cookie (è `SameSite=Strict`): conviene servirlo
-dallo stesso server, indicandone la cartella con `PTA_FRONTEND` (vedi ARCHITETTURA.md).
+dallo stesso server, indicandone la cartella con `PNA_FRONTEND` (vedi ARCHITETTURA.md).

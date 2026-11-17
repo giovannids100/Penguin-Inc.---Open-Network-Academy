@@ -1,18 +1,19 @@
 # /// script
 # requires-python = ">=3.11"
-# dependencies = ["starlette>=0.37", "uvicorn>=0.30", "mcp>=1.10", "pyyaml>=6"]
+# dependencies = ["starlette>=0.37", "uvicorn>=0.30", "pyyaml>=6"]
 # ///
-"""PT Academy: server HTTP del gioco. Input e output sono una topologia vera di Cisco Packet Tracer.
+"""Penguin Inc. — Open Network Academy: server HTTP del gioco. Input e output sono una rete vera.
 
-Browser ──HTTP──▶ questo server ──MCP stdio──▶ packet-tracer-mcp ──bridge :54321──▶ Packet Tracer
+Browser ──HTTP──▶ questo server ──▶ rete/motore.py ──▶ modello della rete ──▶ Mininet (namespace Linux)
 
-Avvio:     uv run server.py              (http://127.0.0.1:8787)
-Remoto:    tailscale funnel 8787         (i giocatori entrano con il codice di accesso)
-Variabili: PTA_HOST (indirizzo di ascolto, default 127.0.0.1; 0.0.0.0 per la rete locale, serve PTA_CODE),
-           PTA_CODE (codice di accesso; se manca il gioco è libero ma si usa solo da questo computer),
-           PTA_PORT o PORT (default 8787),
-           PTA_FRONTEND (cartella del client servito, default ../frontend/demo),
-           PTA_GIOCO (pacchetto di gioco YAML, default ../frontend/demo/gioco: vedi contenuti.py)
+Avvio:     docker compose up              (dalla cartella principale: http://127.0.0.1:8787)
+           python3 server.py              (senza Docker: rete vera se c'è Mininet, altrimenti simulata)
+Variabili: PNA_HOST (indirizzo di ascolto, default 127.0.0.1; 0.0.0.0 per la rete locale, serve PNA_CODE),
+           PNA_CODE (codice di accesso; se manca il gioco è libero ma si usa solo da questo computer),
+           PNA_PORT o PORT (default 8787),
+           PNA_FRONTEND (cartella del client servito, default ../frontend/demo),
+           PNA_GIOCO (pacchetto di gioco YAML, default ../frontend/demo/gioco: vedi contenuti.py),
+           PNA_RETE=simulata (niente Mininet: le prove si calcolano sul modello), PNA_COLLAUDO=1 (debug)
 
 Il server è generico: i contenuti del gioco (missioni, livelli, messaggi, punteggi, dispositivi) arrivano dal
 pacchetto di gioco YAML, e il client è una cartella statica qualsiasi.
@@ -28,6 +29,7 @@ import json
 import os
 import re
 import secrets
+import socket
 import sys
 import time
 from contextlib import asynccontextmanager
@@ -47,7 +49,9 @@ import contenuti as C
 import firewall as FW
 import missions as M
 import rescue as R
-from ptlink import LOCKED_RE, PTError, PTLink, Topo, short_port
+from rete.kernel import entra_nel_namespace
+from rete.motore import ErroreRete, Motore
+from rete.topo import Topo, short_port
 
 # Su Windows la console e i file aperti senza encoding usano cp1252, che non ha caratteri come → e ↔:
 # l'output va sempre in UTF-8 (anche rediretto in un file di log) e i file si aprono con encoding="utf-8".
@@ -56,23 +60,23 @@ for _flusso in (sys.stdout, sys.stderr):
         _flusso.reconfigure(encoding="utf-8", errors="replace")
 
 HERE = Path(__file__).parent
-FRONTEND = Path(os.environ.get("PTA_FRONTEND") or HERE.parent / "frontend" / "demo")
+FRONTEND = Path(os.environ.get("PNA_FRONTEND") or HERE.parent / "frontend" / "demo")
 DATA = HERE / "data"
 DATA.mkdir(exist_ok=True)
 STATE_FILE = DATA / "state.json"
-PORT = int(os.environ.get("PTA_PORT") or os.environ.get("PORT") or 8787)
+PORT = int(os.environ.get("PNA_PORT") or os.environ.get("PORT") or 8787)
 # Codice di accesso facoltativo. Senza codice non c'è login, ma il server risponde solo a richieste
 # indirizzate a questo computer (vedi solo_locale): né da Internet né da siti esterni aperti nel browser.
-ACCESS_CODE = os.environ.get("PTA_CODE", "").strip()
+ACCESS_CODE = os.environ.get("PNA_CODE", "").strip()
 LOGIN_REQUIRED = bool(ACCESS_CODE)
-# Modalità collaudo (PTA_COLLAUDO=1), solo per chi sviluppa, mai in una demo o in una partita vera:
+# Modalità collaudo (PNA_COLLAUDO=1), solo per chi sviluppa, mai in una demo o in una partita vera:
 #  - il client mostra i cheat per il debug e si accende POST /api/collaudo/accademia;
 #  - all'avvio di un livello il server controlla che la rete di partenza funzioni e che ogni guasto si veda
 #    davvero (costa minuti di ping: in gioco i livelli sono già collaudati e si salta).
-COLLAUDO = os.environ.get("PTA_COLLAUDO", "").strip() == "1"
+COLLAUDO = os.environ.get("PNA_COLLAUDO", "").strip() == "1"
 SESSION_TOKEN = secrets.token_urlsafe(32)
 LOCAL_HOSTS = ("127.0.0.1", "localhost", "::1")
-CODA_S = 180  # quanto un'azione aspetta in coda che Packet Tracer si liberi prima di rispondere 409
+CODA_S = 180  # quanto un'azione aspetta in coda che la rete si liberi prima di rispondere 409
 
 # Pacchetto di gioco (contenuti.py): missioni, livelli, messaggi, punteggi e dispositivi, letti dai YAML e
 # ricaricati da soli quando cambiano. Un errore al primo avvio ferma il server con un messaggio chiaro.
@@ -91,11 +95,12 @@ def punteggio(k: str) -> int:
     """Una voce di «punteggio» di impostazioni.yaml: guasto_riparato, costo_indizio, bonus_senza_indizi."""
     return G().impostazioni["punteggio"][k]
 
-# Validazione degli input che finiscono in Packet Tracer.
+# Validazione degli input che finiscono nella rete.
 NAME_RE = re.compile(r"^[A-Za-z0-9_-]{1,24}$")
 POOL_RE = re.compile(r"^[A-Za-z0-9_-]{1,20}$")
 CLI_LINE_RE = re.compile(r"^[\x20-\x7E]{0,160}$")
 TUTTI = ("router", "switch", "firewall", "pc", "server")  # i dispositivi che il gioco sa gestire
+TIPO_DI = {"cloud": "server"}   # tipi del gioco che nella rete sono un altro dispositivo (il cloud è un server)
 HOST_CMD_RE = re.compile(r"^(ping|ipconfig|tracert|arp|nslookup)( [A-Za-z0-9./ -]{0,60})?$", re.I)
 
 
@@ -108,10 +113,10 @@ def default_state() -> dict:
             # aiuti comprati per giorno ({"2": ["mezza-rete"]}) e ultimo giorno chiuso (per il dialogo «dopo»)
             "campaign": {"done": [], "wallet": None, "helps": {}, "last": None},
             "credentials": {},  # dispositivo → credenziali della console (mai restituite dall'API)
-            "firewall": {},     # firewall → regole del giocatore (la verità compilata sta nelle ACL dell'ASA)
+            "firewall": {},     # firewall → regole del giocatore (compilate nelle access-list del firewall)
             "roles": {},        # dispositivo → ruolo mostrato dal client (es. "cloud": un server presentato come cloud)
-            "dns": {},          # server DNS → {nome: IP}: i record creati dal giocatore (PT non li fa rileggere)
-            "dhcp_esclusi": {},  # router → [[da, a], …]: indirizzi esclusi dai pool (PT non li fa rileggere)
+            "dns": {},          # server DNS → {nome: IP}: i record creati dal giocatore (li mostra il client)
+            "dhcp_esclusi": {},  # router → [[da, a], …]: indirizzi esclusi dai pool (li mostra il client)
             "log": []}
 
 
@@ -152,7 +157,7 @@ def log(msg: str, kind: str = "info", points: int = 0) -> None:
     save()
 
 
-pt = PTLink()  # l'unica sessione verso Packet Tracer, condivisa da tutte le richieste
+motore = Motore(DATA)  # il motore di rete (rete/motore.py), condiviso da tutte le richieste
 
 
 # ───────────────────────────── lavori lunghi (job) ─────────────────────────────
@@ -185,32 +190,32 @@ JOB: Job | None = None  # l'ultimo lavoro, in corso o finito
 
 
 def start_job(title: str, coro_fn) -> JSONResponse:
-    """Lancia coro_fn(job) in background con il lock di Packet Tracer e risponde subito.
+    """Lancia coro_fn(job) in background con il lock della rete e risponde subito.
 
-    coro_fn restituisce il risultato {"ok", "message", "win"?}; un ValueError o un PTError diventano
-    un risultato con ok=False e il messaggio. Se c'è già un altro lavoro in corso risponde 409; se PT è solo
+    coro_fn restituisce il risultato {"ok", "message", "win"?}; un ValueError o un ErroreRete diventano
+    un risultato con ok=False e il messaggio. Se c'è già un altro lavoro in corso risponde 409; se la rete è solo
     occupato da un'azione breve il lavoro parte e aspetta il suo turno sul lock.
     """
     global JOB
     if JOB and not JOB.done:
-        return err(f"Packet Tracer è occupato: {JOB.title if JOB and not JOB.done else 'un’altra operazione'}", 409)
+        return err(f"La rete è occupata: {JOB.title if JOB and not JOB.done else 'un’altra operazione'}", 409)
     job = Job(title)
     JOB = job
 
     async def runner():
-        async with pt.lock:
+        async with motore.lock:
             try:
                 job.result = await coro_fn(job) or {}
                 job.ok = job.result.get("ok", True)
-            except PTError as e:
-                job.result, job.ok = {"ok": False, "message": f"Packet Tracer: {e}"}, False
+            except ErroreRete as e:
+                job.result, job.ok = {"ok": False, "message": f"Rete: {e}"}, False
             except ValueError as e:
                 job.result, job.ok = {"ok": False, "message": str(e)}, False
             except Exception as e:  # noqa: BLE001
                 job.result, job.ok = {"ok": False, "message": f"Errore inatteso: {e}"}, False
             finally:
                 try:
-                    await pt.refresh()
+                    await motore.refresh()
                 except Exception:
                     pass
                 job.done = True
@@ -254,7 +259,7 @@ def mask_of(v) -> str:
 
 def need(kind: str | tuple, name: str) -> dict:
     """Il dispositivo «name» della fotografia attuale, che deve essere di uno dei tipi indicati."""
-    d = pt.topo.dev(name)
+    d = motore.topo.dev(name)
     kinds = (kind,) if isinstance(kind, str) else kind
     if not d:
         raise ValueError(f"il dispositivo «{name}» non esiste")
@@ -288,28 +293,25 @@ async def console(device: str, commands: list[str], timeout: float = 30) -> tupl
     creds = STATE["credentials"].get(device)
     if creds:
         try:
-            await pt.unlock(device, creds)
-        except PTError as e:
+            await motore.unlock(device, creds)
+        except ValueError as e:
             raise ValueError(f"{e}. Aggiorna le credenziali con /api/device/login.")
-    good, out = await pt.cli(device, commands, timeout)
-    if LOCKED_RE.search(out):
+    if motore.bloccata(device):
         raise ValueError(f"La console di {device} è protetta da password: comunica utente e password "
                          f"con /api/device/login (o dal pannello del dispositivo) e riprova.")
-    return good, out
+    return await motore.cli(device, commands)
 
 
-async def ios(device: str, lines: list[str], what: str) -> str:
-    """Esegue righe di configurazione IOS e le salva, con login se serve.
+async def configura(device: str, lines: list[str], what: str) -> str:
+    """Esegue righe di configurazione sulla console (con login se serve) e torna in modalità privilegiata.
 
-    Aggiunge enable / configure terminal / end / write memory: come gli strumenti MCP, i form salvano
-    nella startup-config, così uno spegnimento (/api/device/power) non cancella il lavoro del giocatore
-    (misurato: senza salvataggio la configurazione sparisce al riavvio). Se IOS rifiuta una riga lancia
-    ValueError con la riga incriminata. what = cosa si stava facendo.
+    Aggiunge enable / configure terminal / end. Se la console rifiuta una riga lancia ValueError con la riga
+    incriminata. what = cosa si stava facendo.
     """
-    good, out = await console(device, ["enable", "configure terminal", *lines, "end", "write memory"])
+    good, out = await console(device, ["enable", "configure terminal", *lines, "end"])
     if not good:
-        bad = [l for l in out.splitlines() if re.search(r"ERROR|UNKNOWN|TIMEOUT|%", l)]
-        raise ValueError(f"{what}: IOS ha rifiutato il comando. " + " ".join(bad[:3])[:400])
+        bad = [l for l in out.splitlines() if l.lstrip().startswith(("%", "ERROR"))]
+        raise ValueError(f"{what}: la console ha rifiutato il comando. " + " ".join(bad[:3])[:400])
     return out
 
 
@@ -340,7 +342,7 @@ def academy_view(t: Topo) -> dict:
                "theory": current.theory, "steps": M.evaluate(current, t, passi_fatti(current)),
                "topology": current.topologia, "plan": current.piano, "tips": current.consigli,
                "has_network": bool(current.rete), "tutorial": current.tutorial,
-               # il tavolo di partenza (file .pkt o tavolo vuoto) non è ancora stato preparato: il client
+               # il tavolo di partenza (una topologia o il tavolo vuoto) non è ancora stato preparato: il client
                # chiede POST /api/academy/network prima che il giocatore cominci
                "needs_setup": bool(current.rete) and current.id not in STATE["academy"]["pronte"]}
     return {"missions": out, "current": cur, "finished": current is None}
@@ -359,31 +361,20 @@ def segna_passo(m: M.Mission, i: int) -> None:
 
 
 async def carica_rete_missione(job: Job | None, m: M.Mission) -> None:
-    """Prepara il tavolo per la missione m: apre in Packet Tracer il suo file .pkt (rete di partenza),
-    oppure svuota il tavolo (rete «vuota», o nessuna rete). Sostituisce la rete aperta in PT!
+    """Prepara il tavolo per la missione m: carica la sua topologia (rete di partenza, gioco/reti/*.yaml),
+    oppure svuota il tavolo (rete «vuota», o nessuna rete). Sostituisce la rete che c'è!
     Azzera i passi interattivi e segna la missione come pronta."""
     g = G()
     STATE["roles"], STATE["firewall"] = {}, {}
-    limiti_attivi().clear()   # la rete nuova non ha i limiti di quella vecchia
     STATE["academy"]["passi"].pop(m.id, None)
     if m.rete and m.rete != "vuota":
         if job:
             job.step(g.accademia("carico_rete", titolo=m.title))
-        # PT apre una COPIA in data/tavolo/: così un Ctrl+S in Packet Tracer (o un suo salvataggio) non
-        # sovrascrive la rete di partenza della challenge (successo il 15/11 con giorno3.pkt)
-        copia = DATA / "tavolo" / m.rete
-        copia.parent.mkdir(exist_ok=True)
-        copia.write_bytes((GIOCO.cartella / "reti" / m.rete).read_bytes())
-        out = await pt.call("pt_open_project", {"path": str(copia.resolve())}, 120)
-        if "opened" not in out.lower():
-            raise PTError(f"Packet Tracer non ha aperto {m.rete}: {out[:200]}")
+        await motore.carica_topologia(GIOCO.cartella / "reti" / m.rete)
     else:
         if job:
             job.step(g.accademia("svuoto_tavolo"))
-        await pt.clear_canvas()
-    pt.links_dirty = True
-    await pt.settle()
-    await pt.refresh()
+        await motore.clear()
     if m.id not in STATE["academy"]["pronte"]:
         STATE["academy"]["pronte"].append(m.id)
     save()
@@ -391,9 +382,9 @@ async def carica_rete_missione(job: Job | None, m: M.Mission) -> None:
 
 async def job_academy_check(job: Job) -> dict:
     """Lavoro: verifica la missione in corso (passi sulla fotografia, poi il ping vero). Assegna i punti."""
-    pt.links_dirty = True
-    await pt.settle()
-    t = await pt.refresh()
+    motore.links_dirty = True
+    await motore.settle()
+    t = await motore.refresh()
     done = STATE["academy"]["done"]
     g = G()
     m = missione_corrente(g)
@@ -435,7 +426,7 @@ async def job_academy_check(job: Job) -> dict:
             notes = []
             for src, dst, label in plan[:2]:
                 job.step(g.accademia("ping_in_corso", etichetta=label, ip=dst))
-                good, _ = await pt.ping(src, dst, STATE["credentials"].get(src))
+                good, _ = await motore.ping(src, dst, STATE["credentials"].get(src))
                 if good:
                     break
                 notes.append(g.accademia("ping_fallito", etichetta=label, ip=dst))
@@ -458,7 +449,7 @@ async def job_academy_reset(job: Job) -> dict:
     """Lavoro: svuota il tavolo e riporta l'Accademia alla missione 1 (il punteggio resta)."""
     g = G()
     job.step(g.accademia("svuoto_tavolo"))
-    await pt.clear_canvas()
+    await motore.clear()
     STATE["roles"], STATE["firewall"] = {}, {}
     STATE["academy"]["done"] = []
     STATE["academy"]["passi"] = {}
@@ -502,8 +493,8 @@ def rescue_view() -> dict:
 async def run_check(job: Job | None, t: Topo, c: R.Check) -> tuple[bool, str]:
     """Esegue una verifica di un livello sulla rete vera: (passata, perché no).
 
-    Riusa la stessa logica degli endpoint: pt.ping, do_trace (/api/trace), do_browse (/api/host/browse),
-    do_audit (/api/audit) e pt_device_power (/api/device/power).
+    Riusa la stessa logica degli endpoint: motore.ping, do_trace (/api/trace), do_browse (/api/host/browse),
+    do_audit (/api/audit) e lo spegnimento (/api/device/power).
     """
     if job:
         job.step("Verifico: " + c.label())
@@ -511,7 +502,7 @@ async def run_check(job: Job | None, t: Topo, c: R.Check) -> tuple[bool, str]:
         ip = R.resolve(t, c.dst)
         if not ip:
             return False, f"{c.dst.lstrip('@')} non ha un indirizzo IP"
-        good, _ = await pt.ping(c.src, ip, STATE["credentials"].get(c.src))
+        good, _ = await motore.ping(c.src, ip, STATE["credentials"].get(c.src))
         return good, "" if good else f"{c.src} → {ip} senza risposta"
     if c.kind == "blocked":
         tr = await do_trace(c.src, c.dst)
@@ -600,21 +591,17 @@ async def run_check(job: Job | None, t: Topo, c: R.Check) -> tuple[bool, str]:
                 return False, why
         return True, ""
     if c.kind == "survives":
-        await pt.call("pt_device_power", {"device": c.device, "on": False}, 120)
+        await motore.power(c.device, False)
         try:
-            pt.links_dirty = True
-            await pt.settle()
-            await pt.call("pt_fast_forward", {}, 30)  # due avanzamenti: i protocolli di scorta (HSRP, OSPF) hanno timer
-            t2 = await pt.refresh()
+            t2 = await motore.refresh()
             for inner in c.inner:
                 good, why = await run_check(job, t2, inner)
                 if not good:
                     return False, f"con {c.device} spento: {why}"
             return True, ""
         finally:
-            await pt.call("pt_device_power", {"device": c.device, "on": True}, 120)
-            pt.links_dirty = True
-            await pt.settle()
+            await motore.power(c.device, True)
+            await motore.settle()
     raise ValueError(f"verifica sconosciuta: {c.kind}")
 
 
@@ -631,13 +618,14 @@ async def wait_hosts(job: Job, timeout: float = 60) -> Topo:
     """Aspetta (al massimo timeout secondi) che tutti gli host abbiano un indirizzo dal DHCP."""
     end = time.time() + timeout
     while True:
-        t = await pt.refresh()
+        t = await motore.refresh()
         missing = [h["name"] for h in t.hosts() if not t.iface(h)]
         if not missing or time.time() > end:
             return t
         job.step("In attesa degli indirizzi DHCP: " + ", ".join(missing))
-        await pt.call("pt_fast_forward", {}, 30)
-        await asyncio.sleep(2)
+        motore.links_dirty = True
+        await motore.settle()
+        await asyncio.sleep(1)
 
 
 AT_RE = re.compile(r"@([A-Za-z][A-Za-z0-9_-]{0,23})")
@@ -656,9 +644,10 @@ def risolvi_at(t: Topo, testo: str) -> str:
 async def esegui_azioni(ops: list, t: Topo) -> None:
     """Esegue operazioni sulla rete descritte nel pacchetto di gioco (guasti da iniettare, aiuti dei colleghi).
 
-    ("cli", dispositivo, righe)           righe IOS così come sono (con enable/configure terminal/end);
+    ("cli", dispositivo, righe)           righe della console così come sono (con enable/configure terminal/end);
                                            «@PC3» diventa l'IP attuale di PC3
-    ("hostip", argomenti)                  pt_host_ip_config; i valori «@PC2» diventano l'IP attuale di PC2
+    ("hostip", argomenti)                  {"device", "mode"?: "dhcp", "ip", "mask", "gateway", "dns"?};
+                                           i valori «@PC2» diventano l'IP attuale di PC2
     ("add", tipo, nome, x, y)              aggiunge un dispositivo (modello da impostazioni.yaml), se non c'è già
     ("link", a, b)                         collega due dispositivi sulla prima porta libera adatta, se non lo sono già
     ("portip", router, verso, ip, maschera)  IP e no shutdown sulla porta del router collegata a «verso»
@@ -668,25 +657,22 @@ async def esegui_azioni(ops: list, t: Topo) -> None:
     """
     for op in ops:
         if op[0] == "cli":
-            good, out = await pt.cli(op[1], [risolvi_at(t, r) for r in op[2]])
+            good, out = await motore.cli(op[1], [risolvi_at(t, r) for r in op[2]])
             if not good:
                 raise ValueError(f"{op[1]}: {out[-300:]}")
         elif op[0] == "hostip":
             args = {k: (R.resolve(t, v) if isinstance(v, str) and v.startswith("@") else v) for k, v in op[1].items()}
-            await pt.call("pt_host_ip_config", args, 60)
+            if args.get("mode") == "dhcp":
+                await motore.host_dhcp(args["device"])
+            else:
+                await motore.host_ip(args["device"], args["ip"], mask_of(args.get("mask", "255.255.255.0")),
+                                  args.get("gateway") or "", args.get("dns"))
         elif op[0] == "add":
             _, kind, name, x, y = op
             if kind == "cloud":
                 STATE["roles"][name] = "cloud"
             if not t.dev(name):
-                model = G().impostazioni["dispositivi"].get(kind, C.IMPOSTAZIONI_PREDEFINITE["dispositivi"][kind])["modello"]
-                out = await pt.call("pt_add_device", {"name": name, "model": model, "x": x, "y": y})
-                if re.search(r"\berror\b|\bERROR\b|❌", out):
-                    raise ValueError(out[:300])
-                try:
-                    await pt.call("pt_move_device", {"device_name": name, "x": x, "y": y}, 20)
-                except PTError:
-                    pass
+                await motore.add_device(TIPO_DI.get(kind, kind), name, x, y)
         elif op[0] == "link":
             a, c = t.dev(op[1]), t.dev(op[2])
             if not a or not c:
@@ -695,26 +681,23 @@ async def esegui_azioni(ops: list, t: Topo) -> None:
                 pa, pb = t.free_port(a, c["kind"]), t.free_port(c, a["kind"])
                 if not pa or not pb:
                     raise ValueError(f"nessuna porta libera su {a['name'] if not pa else c['name']}")
-                out = await pt.call("pt_add_link", {"device1": a["name"], "port1": pa, "device2": c["name"], "port2": pb})
-                if re.search(r"\bERROR\b|❌|[Ff]ailed", out):
-                    raise ValueError(out[:300])
-                pt.links_dirty = True
+                await motore.link(a["name"], pa, c["name"], pb)
         elif op[0] == "portip":
             _, router, verso, ip, mask = op
             porta = next((p for p, peer, _ in t.neighbors(router) if peer == verso), None)
             if not porta:
                 raise ValueError(f"{router} non è collegato a {verso}")
-            await ios(router, [f"interface {porta}", f"ip address {ip} {mask}", "no shutdown"], f"{router} {porta}")
+            await configura(router, [f"interface {porta}", f"ip address {ip} {mask}", "no shutdown"], f"{router} {porta}")
         elif op[0] == "fwzone":
             _, fw, verso, zona, livello, ip, mask = op
             porta = next((p for p, peer, _ in t.neighbors(fw) if peer == verso), None)
             if not porta:
                 raise ValueError(f"{fw} non è collegato a {verso}")
-            await asa(fw, [(f"interface {porta}", "global"), (f"nameif {zona}", ""), (f"security-level {livello}", ""),
+            await configura_firewall(fw, [(f"interface {porta}", "global"), (f"nameif {zona}", ""), (f"security-level {livello}", ""),
                            (f"ip address {ip} {mask}", ""), ("no shutdown", ""), ("exit", "")], f"{fw} {porta}")
         elif op[0] == "fwrules":
             _, fw, regole = op
-            t = await pt.refresh()
+            t = await motore.refresh()
             d = t.dev(fw)
             if not d:
                 raise ValueError(f"manca {fw} sul tavolo")
@@ -724,14 +707,14 @@ async def esegui_azioni(ops: list, t: Topo) -> None:
         else:
             raise ValueError(f"azione sconosciuta: {op[0]}")
         if op[0] in ("add", "link", "fwzone"):
-            await pt.settle()
-            t = await pt.refresh()
+            await motore.settle()
+            t = await motore.refresh()
 
 
 async def job_rescue_start(job: Job, n: int) -> dict:
     """Lavoro: prepara il livello n. Svuota, costruisce, rompe.
 
-    Con PTA_COLLAUDO=1 (sviluppo) verifica anche che la rete di partenza funzioni e che ogni guasto si veda.
+    Con PNA_COLLAUDO=1 (sviluppo) verifica anche che la rete di partenza funzioni e che ogni guasto si veda.
     """
     g = G()
     lv = g.livelli_per_numero[n]
@@ -740,21 +723,21 @@ async def job_rescue_start(job: Job, n: int) -> dict:
     STATE["mode"] = "rescue"
     save()
     job.step(g.soccorso("svuoto_tavolo"))
-    await pt.clear_canvas()
+    await motore.clear()
     STATE["roles"], STATE["firewall"] = {}, {}
     job.step(g.soccorso("costruisco", numero=n, titolo=lv.title))
-    if lv.build:
-        out = await pt.call("pt_full_build", lv.build, 420)
-        if "Not deployed" in out or "DEPLOYMENT TO PACKET TRACER" not in out:
-            raise ValueError("La costruzione della rete non è andata a buon fine: " + out[-300:])
-    if lv.setup:  # reti con dispositivi che pt_full_build non conosce (firewall, cloud) o ritocchi
-        await esegui_azioni(lv.setup, await pt.refresh())
-    pt.links_dirty = True
-    await pt.settle()
+    if lv.build:   # la topologia di partenza (gioco/reti/livelloN.yaml)
+        await motore.carica_topologia(GIOCO.cartella / "reti" / lv.build)
+    if lv.setup:  # reti costruite con le azioni (firewall, cloud) o ritocchi alla topologia
+        await esegui_azioni(lv.setup, await motore.refresh())
+    motore.links_dirty = True
+    await motore.settle()
     t = await wait_hosts(job)  # gli IP dal DHCP servono per i guasti che usano «@PC2»
     if COLLAUDO:
         job.step(g.soccorso("controllo_partenza"))
         for f in lv.faults:
+            if not f.inject:   # la falla c'è già nella rete di partenza («rompi: []»): lì il guasto si vede da subito
+                continue
             # Solo il traffico legittimo (ping, web): le verifiche di sicurezza all'inizio di solito falliscono.
             good, why, _ = await run_checks(job, t, [c for c in f.all_checks() if c.functional])
             if not good:
@@ -767,7 +750,7 @@ async def job_rescue_start(job: Job, n: int) -> dict:
             raise ValueError(f"Non sono riuscito a preparare il guasto {f.id}: {e}")
     if COLLAUDO:
         await asyncio.sleep(2)
-        t = await pt.refresh()
+        t = await motore.refresh()
         job.step(g.soccorso("controllo_guasti"))
         for f in lv.faults:
             # Almeno una verifica deve fallire, altrimenti il guasto non si vede. Fino a 3 tentativi a 5 s:
@@ -800,9 +783,9 @@ async def job_rescue_check(job: Job) -> dict:
     if not lv or rs["status"] not in ("playing", "won"):
         raise ValueError(g.soccorso("nessun_livello"))
     job.step(g.soccorso("avanzo_tempo"))
-    pt.links_dirty = True
-    await pt.settle()
-    t = await pt.refresh()
+    motore.links_dirty = True
+    await motore.settle()
+    t = await motore.refresh()
     newly, still = [], []
     for f in lv.faults:
         # setdefault: se nel frattempo il YAML ha aggiunto un guasto al livello, parte da zero
@@ -984,7 +967,7 @@ def authed(req: Request) -> bool:
     """Il cookie di sessione è valido; senza codice di accesso non serve (ci pensa solo_locale)."""
     if not LOGIN_REQUIRED:
         return True
-    return secrets.compare_digest(req.cookies.get("pta", ""), SESSION_TOKEN)
+    return secrets.compare_digest(req.cookies.get("pna", ""), SESSION_TOKEN)
 
 
 def request_host(req: Request) -> str:
@@ -996,7 +979,7 @@ def request_host(req: Request) -> str:
 
 
 async def login(req: Request):
-    """POST /api/login — Body: {"code": str}. Imposta il cookie «pta». 403 codice sbagliato, 429 troppi tentativi.
+    """POST /api/login — Body: {"code": str}. Imposta il cookie «pna». 403 codice sbagliato, 429 troppi tentativi.
 
     Senza codice di accesso risponde sempre {"ok": true}: non c'è niente da verificare.
     """
@@ -1017,23 +1000,23 @@ async def login(req: Request):
         return err("Codice errato", 403)
     r = JSONResponse({"ok": True})
     https = req.headers.get("x-forwarded-proto") == "https" or req.url.scheme == "https"
-    r.set_cookie("pta", SESSION_TOKEN, httponly=True, samesite="strict", secure=https, max_age=86400 * 7)
+    r.set_cookie("pna", SESSION_TOKEN, httponly=True, samesite="strict", secure=https, max_age=86400 * 7)
     return r
 
 
 def public_state() -> dict:
     """L'oggetto Stato restituito da quasi tutte le risposte (docs/API.md, «L'oggetto Stato»)."""
-    t = pt.topo
+    t = motore.topo
     return {
         "ok": True,
-        "pt": {"ok": pt.ok, "status": pt.status},
+        "rete": {"ok": motore.ok, "status": motore.status},
         "topology": {**t.to_json(), "roles": STATE["roles"]},
         "firewall": STATE["firewall"],  # regole del giocatore per ogni firewall (le ACL compilate sono in topology)
         # solo per i dispositivi che ci sono ancora (un server o un router tolto non lascia tracce nel pannello)
         "dns": {k: v for k, v in STATE["dns"].items() if t.dev(k)},       # server DNS → {"on", "records"}
         "dhcp_excluded": {k: v for k, v in STATE.setdefault("dhcp_esclusi", {}).items() if t.dev(k)},  # router → [[da, a]]
-        "snap_age": round(time.time() - pt.snap_at, 1),
-        "busy": pt.lock.locked(),
+        "snap_age": round(time.time() - motore.snap_at, 1),
+        "busy": motore.lock.locked(),
         "job": JOB.view() if JOB else None,
         "score": STATE["score"],
         "mode": STATE["mode"],
@@ -1046,27 +1029,27 @@ def public_state() -> dict:
 
 
 async def state(req: Request):
-    """GET /api/state — lo Stato. Non aspetta mai il lock: se PT è libero rinnova una fotografia vecchia di 3 s."""
+    """GET /api/state — lo Stato. Non aspetta mai il lock: se la rete è libera rinnova una fotografia vecchia di 3 s."""
     if not authed(req):
         return err("non autenticato", 401)
-    if time.time() - pt.snap_at > 3 and not pt.lock.locked():
+    if time.time() - motore.snap_at > 3 and not motore.lock.locked():
         try:
-            async with pt.lock:
-                await pt.refresh()
+            async with motore.lock:
+                await motore.refresh()
         except Exception as e:  # noqa: BLE001
-            pt.ok, pt.status = False, f"{e}"[:200]
+            motore.ok, motore.status = False, f"{e}"[:200]
     return JSONResponse(public_state())
 
 
 async def health(req: Request):
-    """GET /api/health — senza login. Il server è acceso e vede Packet Tracer?
+    """GET /api/health — senza login. Il server è acceso e la rete è pronta?
 
     Risponde solo con lo stato del collegamento (niente rete, niente partita): serve al lanciatore
-    «Avvia PT Academy.command» per sapere quando il server è pronto, e a un monitoraggio esterno.
+    «Avvia Penguin Inc.command» per sapere quando il server è pronto, e a un monitoraggio esterno.
     """
     G()  # ricarica il pacchetto di gioco se è cambiato, così un errore nei YAML si vede subito qui
-    return JSONResponse({"ok": True, "app": "pt-academy", "login": LOGIN_REQUIRED,
-                         "pt": {"ok": pt.ok, "status": pt.status},
+    return JSONResponse({"ok": True, "app": "penguin-inc", "login": LOGIN_REQUIRED,
+                         "rete": {"ok": motore.ok, "status": motore.status},
                          "contenuti": {"ok": not GIOCO.errore, "errore": GIOCO.errore}})
 
 
@@ -1087,12 +1070,12 @@ async def ui(req: Request):
 
 
 def action(fn):
-    """Wrapper degli endpoint che modificano Packet Tracer.
+    """Wrapper degli endpoint che modificano la rete.
 
     Controlla login e body JSON, prende il lock, esegue fn(body) e rilegge la rete.
-    Se Packet Tracer è occupato la richiesta si mette in coda (asyncio.Lock serve chi aspetta in ordine di
+    Se la rete è occupata la richiesta si mette in coda (asyncio.Lock serve chi aspetta in ordine di
     arrivo) per al massimo CODA_S secondi; solo dopo risponde 409.
-    Risposta: Stato + i campi del dict restituito da fn. ValueError → 400, PTError → 502.
+    Risposta: Stato + i campi del dict restituito da fn. ValueError → 400, ErroreRete → 502.
     """
     async def handler(req: Request):
         if not authed(req):
@@ -1106,21 +1089,21 @@ def action(fn):
         except Exception:
             return err("richiesta non valida")
         try:
-            await asyncio.wait_for(pt.lock.acquire(), CODA_S)
+            await asyncio.wait_for(motore.lock.acquire(), CODA_S)
         except asyncio.TimeoutError:
-            return err(f"Packet Tracer è occupato da troppo tempo{': ' + JOB.title if JOB and not JOB.done else ''}. "
+            return err(f"La rete è occupata da troppo tempo{': ' + JOB.title if JOB and not JOB.done else ''}. "
                        f"Riprova tra poco.", 409)
         try:
-            if time.time() - pt.snap_at > 1.5:
-                await pt.refresh()
+            if time.time() - motore.snap_at > 1.5:
+                await motore.refresh()
             extra = await fn(body) or {}
-            await pt.refresh()
+            await motore.refresh()
         except ValueError as e:
             return err(str(e))
-        except PTError as e:
-            return err(f"Packet Tracer: {e}"[:600], 502)
+        except ErroreRete as e:
+            return err(f"Rete: {e}"[:600], 502)
         finally:
-            pt.lock.release()
+            motore.lock.release()
         return JSONResponse({**public_state(), **extra})
     return handler
 
@@ -1144,7 +1127,7 @@ def job_action(fn):
 
 
 def game_action(fn):
-    """Wrapper degli endpoint di gioco che non toccano Packet Tracer (modalità, indizi, resa).
+    """Wrapper degli endpoint di gioco che non toccano la rete (modalità, indizi, resa).
 
     Stesse regole di action() per login e body; nessun lock. Risposta: Stato + il dict restituito da fn.
     """
@@ -1172,53 +1155,46 @@ def game_action(fn):
 async def a_add(b):
     """POST /api/device/add — Body: {"kind", "x"?, "y"?}. Crea il dispositivo con il primo nome libero.
 
-    Packet Tracer: pt_add_device, poi pt_move_device. Risposta: Stato + {"selected": nome}.
+    Risposta: Stato + {"selected": nome}.
     """
     kind = b.get("kind")
     dispositivi = G().impostazioni["dispositivi"]
     if kind not in dispositivi:
         raise ValueError("tipo di dispositivo non ammesso")
     x, y = max(20, min(int(b.get("x", 300)), 2000)), max(20, min(int(b.get("y", 300)), 1400))
-    name = pt.topo.next_name(dispositivi[kind]["prefisso"])
-    out = await pt.call("pt_add_device", {"name": name, "model": dispositivi[kind]["modello"], "x": x, "y": y})
-    if re.search(r"\berror\b|\bERROR\b|❌", out):
-        raise ValueError(out[:300])
-    try:  # PT sposta il nuovo dispositivo rispetto al punto chiesto: lo rimettiamo dove ha cliccato il giocatore
-        await pt.call("pt_move_device", {"device_name": name, "x": x, "y": y}, 20)
-    except PTError:
-        pass
-    if kind == "cloud":  # un server presentato come servizio cloud (fittizio): stesso Server-PT, altro ruolo
+    name = motore.topo.next_name(dispositivi[kind]["prefisso"])
+    await motore.add_device(TIPO_DI.get(kind, kind), name, x, y)
+    if kind == "cloud":  # un server presentato come servizio cloud (fittizio): stesso dispositivo, altro ruolo
         STATE["roles"][name] = "cloud"
     log(f"Aggiunto {name}", "build")
     return {"selected": name}
 
 
 async def a_move(b):
-    """POST /api/device/move — Body: {"name", "x", "y"}. Packet Tracer: pt_move_device."""
+    """POST /api/device/move — Body: {"name", "x", "y"}."""
     d = need(TUTTI, b.get("name", ""))
     x, y = max(20, min(int(b["x"]), 2000)), max(20, min(int(b["y"]), 1400))
-    await pt.call("pt_move_device", {"device_name": d["name"], "x": x, "y": y})
+    await motore.move(d["name"], x, y)
 
 
 async def a_delete(b):
-    """POST /api/device/delete — Body: {"name"}. Toglie il dispositivo e i suoi cavi. Packet Tracer: pt_delete_device."""
+    """POST /api/device/delete — Body: {"name"}. Toglie il dispositivo e i suoi cavi."""
     d = need(TUTTI, b.get("name", ""))
-    await pt.call("pt_delete_device", {"device_name": d["name"]})
-    pt.links_dirty = True
+    await motore.delete(d["name"])
     for k in ("credentials", "firewall", "roles"):
         STATE[k].pop(d["name"], None)
     log(f"Eliminato {d['name']}", "build")
 
 
 async def a_rename(b):
-    """POST /api/device/rename — Body: {"name", "new"}. Packet Tracer: pt_rename_device. Risposta: Stato + {"selected": nuovo nome}."""
+    """POST /api/device/rename — Body: {"name", "new"}. Risposta: Stato + {"selected": nuovo nome}."""
     d = need(TUTTI, b.get("name", ""))
     new = str(b.get("new", "")).strip()
     if not NAME_RE.match(new):
         raise ValueError("nome non valido: solo lettere, numeri, - e _ (max 24)")
-    if pt.topo.dev(new):
+    if motore.topo.dev(new):
         raise ValueError(f"esiste già un dispositivo chiamato {new}")
-    await pt.call("pt_rename_device", {"old_name": d["name"], "new_name": new})
+    await motore.rename(d["name"], new)
     # tutto ciò che il gioco ricorda per nome segue il dispositivo (record DNS, esclusi DHCP, regole…)
     for k in ("credentials", "firewall", "roles", "dns", "dhcp_esclusi"):
         if d["name"] in STATE.setdefault(k, {}):
@@ -1230,37 +1206,32 @@ async def a_rename(b):
 async def a_link(b):
     """POST /api/link — Body: {"a", "b", "pa"?, "pb"?}. Collega due dispositivi.
 
-    Senza pa/pb sceglie la prima porta libera adatta (Topo.free_port). Packet Tracer: pt_add_link,
-    che sceglie anche il tipo di cavo.
+    Senza pa/pb sceglie la prima porta libera adatta (Topo.free_port).
     """
-    a, c = pt.topo.dev(b.get("a", "")), pt.topo.dev(b.get("b", ""))
+    a, c = motore.topo.dev(b.get("a", "")), motore.topo.dev(b.get("b", ""))
     if not a or not c or a is c:
         raise ValueError("scegli due dispositivi diversi")
     if a["kind"] in ("pc", "server") and c["kind"] in ("pc", "server"):
         raise ValueError("Due PC/server non si collegano direttamente in questo gioco: passa da uno switch.")
-    pa = b.get("pa") or pt.topo.free_port(a, c["kind"])
-    pb = b.get("pb") or pt.topo.free_port(c, a["kind"])
+    pa = b.get("pa") or motore.topo.free_port(a, c["kind"])
+    pb = b.get("pb") or motore.topo.free_port(c, a["kind"])
     if not pa or not pb:
         raise ValueError(f"Nessuna porta libera su {a['name'] if not pa else c['name']}.")
     for d, p in ((a, pa), (c, pb)):
         port = need_port(d, p)
         if port["link"]:
             raise ValueError(f"La porta {p} di {d['name']} è già occupata")
-    out = await pt.call("pt_add_link", {"device1": a["name"], "port1": pa, "device2": c["name"], "port2": pb})
-    if re.search(r"\bERROR\b|❌|[Ff]ailed", out):
-        raise ValueError(out[:300])
-    pt.links_dirty = True
+    await motore.link(a["name"], pa, c["name"], pb)
     log(f"Cavo {a['name']} {short_port(pa)} ↔ {c['name']} {short_port(pb)}", "build")
 
 
 async def a_unlink(b):
-    """POST /api/unlink — Body: {"name", "port"}. Stacca il cavo da una porta (una qualsiasi delle due estremità). Packet Tracer: pt_delete_link."""
+    """POST /api/unlink — Body: {"name", "port"}. Stacca il cavo da una porta (una qualsiasi delle due estremità)."""
     d = need(TUTTI, b.get("name", ""))
     p = need_port(d, b.get("port", ""))
     if not p["link"]:
         raise ValueError("su quella porta non c'è un cavo")
-    await pt.call("pt_delete_link", {"device_name": d["name"], "interface_name": p["n"]})
-    pt.links_dirty = True
+    await motore.unlink(d["name"], p["n"])
     log(f"Scollegato {d['name']} {short_port(p['n'])}", "build")
 
 
@@ -1268,21 +1239,11 @@ async def a_unlink(b):
 async def a_host_ip(b):
     """POST /api/host/ip — Body: {"name", "mode"?: "static"|"dhcp", "ip", "mask"?, "gateway"?, "dns"?}.
 
-    Packet Tracer: pt_host_ip_config. In DHCP prima fa avanzare il tempo (porta appena cablata) e ritenta
-    una volta. Risposta: Stato; in DHCP + {"toast": esito}.
+    In DHCP il PC chiede subito un indirizzo. Risposta: Stato; in DHCP + {"toast": esito}.
     """
     d = need(("pc", "server"), b.get("name", ""))
     if b.get("mode") == "dhcp":
-        pt.links_dirty = True
-        await pt.settle()  # una porta appena cablata è ancora in STP listening: la richiesta DHCP andrebbe persa
-        got = None
-        for _ in range(2):
-            await pt.call("pt_host_ip_config", {"device": d["name"], "mode": "dhcp", "wait_dhcp_s": 15}, 90)
-            t = await pt.refresh()
-            got = t.iface(t.dev(d["name"]))
-            if got:
-                break
-            await pt.call("pt_fast_forward", {}, 30)
+        got = await motore.host_dhcp(d["name"])
         log(f"{d['name']}: DHCP" + (f" → {got}" if got else " (nessuna risposta)"), "config")
         return {"toast": f"{d['name']} ha ricevuto {got}" if got else
                 f"{d['name']} non ha ricevuto un indirizzo: c'è un server DHCP in questa rete?"}
@@ -1290,9 +1251,9 @@ async def a_host_ip(b):
     gw = str(b.get("gateway", "")).strip()
     args["gateway"] = ip_of(gw, "Gateway") if gw else "0.0.0.0"
     dns = str(b.get("dns", "")).strip()
-    if dns:   # vuoto = il DNS resta quello che c'è (Packet Tracer non lo fa rileggere)
+    if dns:   # vuoto = il DNS resta quello che c'è
         args["dns"] = ip_of(dns, "DNS")
-    await pt.call("pt_host_ip_config", args, 60)
+    await motore.host_ip(d["name"], args["ip"], args["mask"], args["gateway"], args.get("dns"))
     log(f"{d['name']}: IP {args['ip']} / {args['mask']}" + (f", gateway {args['gateway']}" if gw else "")
         + (f", DNS {args['dns']}" if dns else ""), "config")
 
@@ -1300,7 +1261,7 @@ async def a_host_ip(b):
 async def a_iface(b):
     """POST /api/router/iface — Body: {"name", "port", "ip"?, "mask"?, "clear_ip"?, "on"?}.
 
-    IOS: interface · ip address (o no ip address) · no shutdown / shutdown.
+    Console: interface · ip address (o no ip address) · no shutdown / shutdown.
     """
     d = need("router", b.get("name", ""))
     p = need_port(d, b.get("port", ""))
@@ -1312,23 +1273,23 @@ async def a_iface(b):
         lines.append("no ip address")
     on = need_bool(b, "on") if "on" in b else True
     lines.append("no shutdown" if on else "shutdown")
-    await ios(d["name"], lines, f"{d['name']} {p['n']}")
-    pt.links_dirty = True
+    await configura(d["name"], lines, f"{d['name']} {p['n']}")
+    motore.links_dirty = True
     log(f"{d['name']} {short_port(p['n'])}: " + (f"IP {ip}, " if ip else "") + ("accesa" if on else "spenta"), "config")
 
 
 async def a_port_state(b):
-    """POST /api/port/state — Body: {"name", "port", "on": bool}. Router o switch. IOS: interface · no shutdown / shutdown."""
+    """POST /api/port/state — Body: {"name", "port", "on": bool}. Router o switch. Console: interface · no shutdown / shutdown."""
     d = need(("router", "switch"), b.get("name", ""))
     p = need_port(d, b.get("port", ""))
     on = need_bool(b, "on")
-    await ios(d["name"], [f"interface {p['n']}", "no shutdown" if on else "shutdown"], f"{d['name']} {p['n']}")
-    pt.links_dirty = True
+    await configura(d["name"], [f"interface {p['n']}", "no shutdown" if on else "shutdown"], f"{d['name']} {p['n']}")
+    motore.links_dirty = True
     log(f"{d['name']} {short_port(p['n'])} {'accesa' if on else 'spenta'}", "config")
 
 
 async def a_vlan(b):
-    """POST /api/switch/vlan — Body: {"name", "port", "vlan": 1-1005}. IOS: vlan · interface · switchport mode access · switchport access vlan."""
+    """POST /api/switch/vlan — Body: {"name", "port", "vlan": 1-1005}. Console: vlan · interface · switchport mode access · switchport access vlan."""
     d = need("switch", b.get("name", ""))
     p = need_port(d, b.get("port", ""))
     try:
@@ -1336,9 +1297,9 @@ async def a_vlan(b):
         assert 1 <= v <= 1005
     except Exception:
         raise ValueError("VLAN non valida (1-1005)")
-    await ios(d["name"], [f"vlan {v}", "exit", f"interface {p['n']}", "switchport mode access",
+    await configura(d["name"], [f"vlan {v}", "exit", f"interface {p['n']}", "switchport mode access",
                           f"switchport access vlan {v}"], f"{d['name']} {p['n']}")
-    pt.links_dirty = True
+    motore.links_dirty = True
     log(f"{d['name']} {short_port(p['n'])} → VLAN {v}", "config")
 
 
@@ -1346,7 +1307,7 @@ async def a_dhcp_pool(b):
     """POST /api/router/dhcp — Body: {"name", "pool"?, "network", "mask"?, "gateway", "dns"?, "exclude_from"?,
     "exclude_to"?}.
 
-    IOS: ip dhcp excluded-address <gateway> [· ip dhcp excluded-address <da> <a>] · ip dhcp pool · network ·
+    Console: ip dhcp excluded-address <gateway> [· ip dhcp excluded-address <da> <a>] · ip dhcp pool · network ·
     default-router · dns-server. Gli esclusi servono a non dare via gli indirizzi fissi dei server.
     """
     d = need("router", b.get("name", ""))
@@ -1365,7 +1326,7 @@ async def a_dhcp_pool(b):
     lines += [f"ip dhcp pool {name}", f"network {net} {mask}", f"default-router {gw}"]
     if str(b.get("dns", "")).strip():
         lines.append(f"dns-server {ip_of(b['dns'], 'DNS')}")
-    await ios(d["name"], lines, f"pool DHCP su {d['name']}")
+    await configura(d["name"], lines, f"pool DHCP su {d['name']}")
     mie = STATE.setdefault("dhcp_esclusi", {}).setdefault(d["name"], [])
     for e in esclusi:
         if e not in mie:
@@ -1375,7 +1336,7 @@ async def a_dhcp_pool(b):
     log(f"{d['name']}: pool DHCP {name} {net}/{mask} gw {gw}" + (f", DNS {dns}" if dns else "")
         + (f", esclusi {esclusi[1][0]}–{esclusi[1][1]}" if da else ""), "config")
     # i PC già in DHCP prendono le novità del pool (gateway, DNS) solo rinnovando l'indirizzo
-    clienti = [h["name"] for h in pt.topo.hosts() if h.get("dhcp")]
+    clienti = [h["name"] for h in motore.topo.hosts() if h.get("dhcp")]
     if clienti:
         return {"toast": f"Pool salvato. I PC già in DHCP ({', '.join(clienti[:4])}) ricevono le novità solo con "
                          f"«Rinnova indirizzo»."}
@@ -1392,7 +1353,7 @@ def intervallo_escluso(da, a) -> list[str]:
 
 async def a_dhcp_remove(b):
     """POST /api/router/dhcp/remove — Body: {"name", "pool"}. Toglie un pool DHCP e gli indirizzi esclusi che
-    stanno nella sua rete. IOS: no ip dhcp pool · no ip dhcp excluded-address."""
+    stanno nella sua rete. Console: no ip dhcp pool · no ip dhcp excluded-address."""
     d = need("router", b.get("name", ""))
     nome = str(b.get("pool", "")).strip()
     pool = next((x for x in d.get("pools", []) if x.get("name") == nome), None)
@@ -1406,7 +1367,7 @@ async def a_dhcp_remove(b):
         rete = None
     via = [e for e in mie if rete and ipaddress.IPv4Address(e[0]) in rete]
     lines += [f"no ip dhcp excluded-address {x} {y}" for x, y in via]
-    await ios(d["name"], lines, f"pool DHCP su {d['name']}")
+    await configura(d["name"], lines, f"pool DHCP su {d['name']}")
     for e in via:
         mie.remove(e)
     save()
@@ -1415,11 +1376,11 @@ async def a_dhcp_remove(b):
 
 async def a_dhcp_exclude(b):
     """POST /api/router/dhcp/exclude — Body: {"name", "from", "to"?, "remove"?}. Aggiunge o toglie un intervallo di
-    indirizzi che il DHCP del router non deve dare via. IOS: [no] ip dhcp excluded-address <da> <a>."""
+    indirizzi che il DHCP del router non deve dare via. Console: [no] ip dhcp excluded-address <da> <a>."""
     d = need("router", b.get("name", ""))
     e = intervallo_escluso(b.get("from"), b.get("to"))
     neg = "no " if b.get("remove") else ""
-    await ios(d["name"], [f"{neg}ip dhcp excluded-address {e[0]} {e[1]}"], f"indirizzi esclusi su {d['name']}")
+    await configura(d["name"], [f"{neg}ip dhcp excluded-address {e[0]} {e[1]}"], f"indirizzi esclusi su {d['name']}")
     mie = STATE.setdefault("dhcp_esclusi", {}).setdefault(d["name"], [])
     if neg and e in mie:
         mie.remove(e)
@@ -1430,18 +1391,18 @@ async def a_dhcp_exclude(b):
 
 
 async def a_route(b):
-    """POST /api/router/route — Body: {"name", "network", "mask", "via", "remove"?}. IOS: [no] ip route <network> <mask> <via>."""
+    """POST /api/router/route — Body: {"name", "network", "mask", "via", "remove"?}. Console: [no] ip route <network> <mask> <via>."""
     d = need("router", b.get("name", ""))
     net, mask, via = ip_of(b.get("network"), "Rete"), mask_of(b.get("mask")), ip_of(b.get("via"), "Next hop")
     neg = "no " if b.get("remove") else ""
     if not neg:
         controlla_rotta(d, net, mask, via)
-    await ios(d["name"], [f"{neg}ip route {net} {mask} {via}"], f"rotta su {d['name']}")
+    await configura(d["name"], [f"{neg}ip route {net} {mask} {via}"], f"rotta su {d['name']}")
     if not neg:
-        # Misurato il 15/11: IOS può accettare il comando senza mettere la rotta in tabella (o rifiutarlo senza
-        # che la console lo segnali): si controlla nella tabella vera e, se manca, si dice perché.
-        pt.links_dirty = True
-        t = await pt.refresh()
+        # Una rotta accettata dalla console entra in tabella solo se il next hop è raggiungibile (porta accesa e
+        # collegata): si controlla nella tabella e, se manca, si dice perché.
+        motore.links_dirty = True
+        t = await motore.refresh()
         r = t.dev(d["name"]) or {}
         if not any(x.get("proto") == "S" and x.get("net") == net and x.get("mask") == mask for x in r.get("routes", [])):
             raise ValueError(f"{d['name']} non ha messo in tabella la rotta per {net}/{mask} via {via}: controlla che "
@@ -1450,8 +1411,8 @@ async def a_route(b):
 
 
 def controlla_rotta(d: dict, net: str, mask: str, via: str) -> None:
-    """Gli errori più comuni con le rotte statiche, spiegati prima di mandarle a IOS (che li rifiuterebbe in
-    silenzio): un indirizzo al posto della rete, il next hop che è il router stesso o che non è un vicino."""
+    """Gli errori più comuni con le rotte statiche, spiegati prima di mandarle alla console (che li
+    rifiuterebbe senza spiegare): un indirizzo al posto della rete, il next hop che è il router stesso o che non è un vicino."""
     rete = ipaddress.IPv4Network(f"{net}/{mask}", strict=False)
     if str(rete.network_address) != net:
         raise ValueError(f"«{net}» è un indirizzo, non una rete: con la maschera {mask} la rete da scrivere è "
@@ -1470,10 +1431,10 @@ def controlla_rotta(d: dict, net: str, mask: str, via: str) -> None:
 
 # ───────────────────────────── endpoint: console e prove ─────────────────────────────
 async def a_cli(b):
-    """POST /api/cli — Body: {"name", "commands": [righe] | testo}. Righe IOS libere su router e switch.
+    """POST /api/cli — Body: {"name", "commands": [righe] | testo}. Righe libere della console su router e switch.
 
-    Max 15 righe ASCII stampabili da 160 caratteri. Packet Tracer: pt_cli. Un comando rifiutato da IOS
-    non è un errore HTTP: l'esito è nel testo. Risposta: Stato + {"console": testo}.
+    Max 15 righe ASCII stampabili da 160 caratteri. Un comando rifiutato dalla console non è un errore
+    HTTP: l'esito è nel testo. Risposta: Stato + {"console": testo}.
     """
     d = need(("router", "switch"), b.get("name", ""))
     cmds = b.get("commands")
@@ -1483,7 +1444,7 @@ async def a_cli(b):
         raise ValueError("comandi non validi (max 15 righe di testo semplice)")
     cmds = [c for c in cmds if c.strip()]
     good, out = await console(d["name"], cmds)
-    pt.links_dirty = True
+    motore.links_dirty = True
     log(f"{d['name']} console: {cmds[0]}" + (f" (+{len(cmds) - 1})" if len(cmds) > 1 else ""), "config")
     return {"console": out}
 
@@ -1491,71 +1452,25 @@ async def a_cli(b):
 async def a_host_cmd(b):
     """POST /api/host/cmd — Body: {"name", "command"}. Prompt dei comandi di PC e server.
 
-    Solo ping, ipconfig, tracert, arp, nslookup (HOST_CMD_RE). Packet Tracer: pt_host_command.
-    Risposta: Stato + {"console": testo}.
+    Solo ping, ipconfig, tracert, arp, nslookup (HOST_CMD_RE). Risposta: Stato + {"console": testo}.
     """
     d = need(("pc", "server"), b.get("name", ""))
     cmd = str(b.get("command", "")).strip()
     if not HOST_CMD_RE.match(cmd):
         raise ValueError("Comandi ammessi: ping, ipconfig, tracert, arp, nslookup")
-    await pt.settle()
-    if cmd.lower().startswith("nslookup"):
-        await scalda_dns(d["name"])
-    out = await comando_host(d["name"], cmd, 60)
+    out = await motore.host_cmd(d["name"], cmd)
     log(f"{d['name']}> {cmd}", "config")
     return {"console": out}
 
 
-BLOCCATO_NSLOOKUP = "enter a valid server ip address"
-
-
-async def comando_host(src: str, cmd: str, timeout: int) -> str:
-    """Un comando nel prompt di un PC o server, che non lascia il prompt bloccato.
-
-    Misurato il 15/11: se un nslookup va in timeout, il prompt di PT resta nella modalità interattiva di
-    nslookup («>») e ogni comando dopo risponde «Unrecognized command … enter a valid server ip address».
-    Si esce con «exit»: lo si fa dopo un nslookup senza risposta e, se il prompt era già bloccato, si esce e si
-    riprova il comando una volta.
-    """
-    out = await pt.call("pt_host_command", {"device": src, "command": cmd, "timeout": timeout}, timeout + 60)
-    if BLOCCATO_NSLOOKUP in out:
-        await pt.call("pt_host_command", {"device": src, "command": "exit", "timeout": 15}, 40)
-        out = await pt.call("pt_host_command", {"device": src, "command": cmd, "timeout": timeout}, timeout + 60)
-    if cmd.lower().startswith("nslookup") and ("Name:" not in out or "TIMEOUT" in out or BLOCCATO_NSLOOKUP in out):
-        await pt.call("pt_host_command", {"device": src, "command": "exit", "timeout": 15}, 40)
-    return out
-
-
-_SCALDATI: dict[str, float] = {}   # host → quando il percorso verso il suo DNS è stato «scaldato»
-
-
-async def scalda_dns(src: str) -> None:
-    """Un ping solo verso il DNS dell'host prima di un nslookup.
-
-    Misurato il 15/11: il primo nslookup dopo qualche minuto di silenzio ci mette ~15 s (la prima richiesta si
-    perde mentre PC e router risolvono gli indirizzi MAC con ARP) o va in timeout, i successivi ~1,5 s. Due ping
-    al DNS (il primo può perdersi per l'ARP) preparano il percorso. Si rifà solo dopo più di 60 secondi.
-    """
-    h = pt.topo.dev(src) or {}
-    dns = h.get("dns") or ""
-    if dns in ("", "0.0.0.0") or time.time() - _SCALDATI.get(src, 0) < 60:
-        return
-    try:
-        await comando_host(src, f"ping -n 2 {dns}", 20)
-    except PTError:
-        pass
-    _SCALDATI[src] = time.time()
-
-
 async def a_ping(b):
-    """POST /api/ping — Body: {"from", "ip"}. Ping vero da PC, server o router.
+    """POST /api/ping — Body: {"from", "ip"}. Ping vero da PC, server o router (4 pacchetti, Motore.ping).
 
-    Un tentativo da 4 pacchetti (PTLink.ping): da PC e server «ping -n 4», da router «ping IP repeat 4».
     Risposta: Stato + {"ping": {"ok", "out"}}.
     """
     d = need(("pc", "server", "router"), b.get("from", ""))
     ip = ip_of(b.get("ip", ""), "IP")
-    good, out = await pt.ping(d["name"], ip, STATE["credentials"].get(d["name"]))  # da router passa dalla console
+    good, out = await motore.ping(d["name"], ip)
     log(f"Ping {d['name']} → {ip}: {'risponde ✅' if good else 'nessuna risposta ❌'}", "ok" if good else "fail")
     return {"ping": {"ok": good, "out": out}}
 
@@ -1566,15 +1481,15 @@ async def a_ping(b):
 # alla prova la resistenza (spegnimento, HSRP). Contratto completo in docs/API.md, «Sicurezza».
 
 ACL_NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{0,29}$|^\d{1,4}$")
-SECRET_RE = re.compile(r"^[\x21-\x7E]{4,32}$")          # niente spazi: è una password di IOS
+SECRET_RE = re.compile(r"^[\x21-\x7E]{4,32}$")          # niente spazi: è una password della console
 USER_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{0,19}$")
 DOMAIN_RE = re.compile(r"^[A-Za-z0-9-]{1,30}(\.[A-Za-z0-9-]{1,30}){1,3}$")
-BANNER_RE = re.compile(r"^[\x20-\x22\x24-\x7E]{1,120}$")  # testo semplice senza «#», che IOS usa come delimitatore
+BANNER_RE = re.compile(r"^[\x20-\x22\x24-\x7E]{1,120}$")  # testo semplice senza «#», che la console usa come delimitatore
 URL_RE = re.compile(r"^https?://[A-Za-z0-9.-]{1,60}(:\d{1,5})?(/[A-Za-z0-9._~/-]{0,80})?$")
 ACL_PROTOCOLS = ("ip", "icmp", "tcp", "udp")
 VIOLATIONS = ("shutdown", "restrict", "protect")
 
-# Codici dell'audit di packet-tracer-mcp, spiegati al giocatore.
+# Codici dell'audit (rete/console.py, audit()), spiegati al giocatore.
 AUDIT_IT = {
     "NO_ENABLE_SECRET": "Manca la password di enable (enable secret): chiunque arrivi alla console diventa amministratore.",
     "ENABLE_SECRET_REVERSIBLE": "La password di enable è salvata in modo reversibile: si può ricavare dalla configurazione.",
@@ -1589,30 +1504,8 @@ AUDIT_IT = {
 }
 
 
-def mcp_json(out: str) -> dict:
-    """Il JSON che molti strumenti MCP restituiscono come testo; {} se la risposta non è JSON."""
-    try:
-        v = json.loads(out)
-        return v if isinstance(v, dict) else {}
-    except ValueError:
-        return {}
-
-
-def mcp_checked(out: str, what: str) -> dict:
-    """Risposta di uno strumento MCP di configurazione: ValueError se non valida o se IOS ha rifiutato qualcosa."""
-    r = mcp_json(out)
-    if not r:
-        raise ValueError(f"{what}: risposta inattesa da Packet Tracer: {out[:200]}")
-    if r.get("valid") is False:
-        raise ValueError(f"{what}: " + "; ".join(map(str, r.get("errors") or ["dati non validi"]))[:400])
-    if r.get("verified") is False:
-        bad = "; ".join(f"{x.get('command', '')} ({x.get('reason', '')})" for x in r.get("rejected_lines") or [])
-        raise ValueError(f"{what}: IOS ha rifiutato la configurazione. {bad}"[:400])
-    return r
-
-
 def acl_address(v, what: str) -> str:
-    """Indirizzo di una regola ACL in forma leggibile → forma IOS.
+    """Indirizzo di una regola ACL in forma leggibile → forma della console.
 
     "any" → any · "192.168.1.10" → host 192.168.1.10 · "192.168.1.0/24" → 192.168.1.0 0.0.0.255
     """
@@ -1628,8 +1521,16 @@ def acl_address(v, what: str) -> str:
     return f"host {ip_of(v, what)}"
 
 
+def acl_line(e: dict) -> str:
+    """Una regola validata da acl_rules → riga della console («permit tcp any host 10.0.0.5 eq 80»)."""
+    if "protocol" not in e:
+        return f"{e['action']} {e['source']}"
+    porta = f" eq {e['dest_port']}" if e.get("dest_port") else ""
+    return f"{e['action']} {e['protocol']} {e['source']} {e['destination']}{porta}"
+
+
 def acl_rules(rules, extended: bool) -> list[dict]:
-    """Regole ACL dell'API → «entries» di pt_apply_acl, validate una per una."""
+    """Regole ACL dell'API → regole validate una per una (acl_line le scrive per la console)."""
     if not isinstance(rules, list) or not 0 < len(rules) <= 30:
         raise ValueError("servono da 1 a 30 regole")
     out = []
@@ -1659,7 +1560,7 @@ def acl_rules(rules, extended: bool) -> list[dict]:
 
 
 def acl_delete_lines(acl: dict) -> list[str]:
-    """Righe IOS che cancellano un'ACL esistente (nominata o numerata) letta dallo snapshot."""
+    """Righe della console che cancellano un'ACL esistente (nominata o numerata) letta dallo snapshot."""
     if acl["id"].isdigit():
         return [f"no access-list {acl['id']}"]
     return [f"no ip access-list {'extended' if acl.get('extended') else 'standard'} {acl['id']}"]
@@ -1670,8 +1571,8 @@ async def a_acl(b):
 
     Body: {"name", "acl", "type": "standard"|"extended", "rules": [...], "port"?, "direction"?: "in"|"out"}.
     Regola: {"action": "permit"|"deny", "protocol"?, "source"?, "destination"?, "port"?}, indirizzi in
-    forma leggibile (vedi acl_address). Se l'ACL esiste già viene cancellata prima: IOS altrimenti
-    accoderebbe le regole nuove a quelle vecchie. Packet Tracer: pt_apply_acl (verifica ogni riga).
+    forma leggibile (vedi acl_address). Se l'ACL esiste già viene cancellata prima: la console altrimenti
+    accoderebbe le regole nuove a quelle vecchie.
 
     Porte: con "port" l'ACL viene staccata dalle altre porte a cui era applicata e messa solo lì (spostarla
     è un'unica richiesta); con "port": "" viene staccata da tutte; senza "port" restano quelle di prima.
@@ -1690,13 +1591,13 @@ async def a_acl(b):
         if kind == "extended" and not (100 <= n <= 199 or 2000 <= n <= 2699):
             raise ValueError(f"Le ACL estese con un numero vanno da 100 a 199: {acl_id} non va bene (oppure usa un nome).")
     entries = acl_rules(b.get("rules"), kind == "extended")
-    args = {"router": d["name"], "name_or_number": acl_id, "acl_type": kind, "entries": entries}
+    binding = None
     if b.get("port"):
         p = need_port(d, b["port"])
         direction = b.get("direction", "in")
         if direction not in ("in", "out"):
             raise ValueError("«direction» deve essere in o out")
-        args.update(binding_interface=p["n"], binding_direction=direction)
+        binding = (p["n"], direction)
     lines = []
     if "port" in b:  # la porta indicata (o nessuna) sostituisce quelle di prima
         for p in d["ports"]:
@@ -1706,18 +1607,21 @@ async def a_acl(b):
     old = next((a for a in d.get("acls", []) if a["id"] == acl_id), None)
     if old:
         lines += acl_delete_lines(old)
-    if lines:
-        await ios(d["name"], lines, f"cancellazione della vecchia ACL {acl_id}")
-    mcp_checked(await pt.call("pt_apply_acl", args, 120), f"ACL {acl_id}")
-    pt.links_dirty = True
-    where = f" su {short_port(args['binding_interface'])} {args['binding_direction']}" if b.get("port") else ""
+    if acl_id.isdigit():
+        lines += [f"access-list {acl_id} {acl_line(e)}" for e in entries]
+    else:
+        lines += [f"ip access-list {kind} {acl_id}", *[acl_line(e) for e in entries], "exit"]
+    if binding:
+        lines += [f"interface {binding[0]}", f"ip access-group {acl_id} {binding[1]}", "exit"]
+    await configura(d["name"], lines, f"ACL {acl_id}")
+    where = f" su {short_port(binding[0])} {binding[1]}" if binding else ""
     log(f"{d['name']}: ACL {acl_id} ({len(entries)} regole){where}", "config")
 
 
 async def a_acl_remove(b):
     """POST /api/router/acl/remove — Body: {"name", "acl"}. Stacca l'ACL da tutte le porte e la cancella.
 
-    IOS: interface · no ip access-group <acl> in|out (per ogni porta) · no ip access-list / no access-list.
+    Console: interface · no ip access-group <acl> in|out (per ogni porta) · no ip access-list / no access-list.
     """
     d = need("router", b.get("name", ""))
     acl_id = str(b.get("acl", "")).strip()
@@ -1729,8 +1633,7 @@ async def a_acl_remove(b):
         for direction in ("in", "out"):
             if p.get(f"acl_{direction}") == acl_id:
                 lines += [f"interface {p['n']}", f"no ip access-group {acl_id} {direction}", "exit"]
-    await ios(d["name"], lines + acl_delete_lines(old), f"rimozione dell'ACL {acl_id}")
-    pt.links_dirty = True
+    await configura(d["name"], lines + acl_delete_lines(old), f"rimozione dell'ACL {acl_id}")
     log(f"{d['name']}: ACL {acl_id} rimossa", "config")
 
 
@@ -1738,7 +1641,7 @@ async def a_browse(b):
     """POST /api/host/browse — Body: {"name", "url"}. Apre un indirizzo web dal browser di un PC o server.
 
     Serve a provare un servizio, non solo la raggiungibilità: un'ACL può lasciar passare il ping e bloccare
-    il web. Packet Tracer: pt_web_browser. Risposta: Stato + {"web": {"ok", "text"}}.
+    il web. Risposta: Stato + {"web": {"ok", "text"}}.
     """
     d = need(("pc", "server"), b.get("name", ""))
     url = str(b.get("url", "")).strip()
@@ -1751,106 +1654,14 @@ async def a_browse(b):
 
 async def do_browse(host: str, url: str) -> tuple[bool, str]:
     """Apre url dal browser di host: (pagina ricevuta, testo della pagina o spiegazione). Usata anche dai livelli."""
-    await pt.settle()
-    # Se il browser mostra già la stessa pagina, PT non distingue «nessuna risposta» da «stessa pagina di
-    # nuovo» (misurato): prima lo si porta su un indirizzo che fallisce subito, il PC stesso.
-    try:
-        await pt.call("pt_web_browser", {"device": host, "url": "http://127.0.0.1", "timeout": 3}, 30)
-    except PTError:
-        pass
-    out = await pt.call("pt_web_browser", {"device": host, "url": url, "timeout": 15}, 60)
-    r = mcp_json(out)
-    ok = bool(r.get("text")) and r.get("ok") is not False
-    return ok, (r.get("text") if ok else out)[:4000]
-
-
-def trace_summary(raw: dict, src: str, dst: str, topo: Topo) -> dict:
-    """Riduce la traccia di pt_send_pdu al percorso del ping e al verdetto.
-
-    hops: il giro del ping, un passo per dispositivo: «andata» da src fino a dst, poi «ritorno» fino a src.
-      La lista eventi di PT mescola più pacchetti e traffico di fondo (ARP, STP): il giro si ricostruisce
-      sui soli frame ICMP, e il passo successivo è il frame ricevuto dal vicino collegato (secondo la
-      topologia) alla porta d'uscita del passo attuale, su quella porta. Il frame di dst che riceve la
-      richiesta è anche quello che spedisce la risposta, per questo è un unico giro e non due catene.
-    blocked_by: il primo scarto inatteso, con il motivo scritto da PT (es. la riga dell'ACL).
-    """
-    tr = raw.get("trace") or {}
-    # Solo i frame di questo ping: ogni frame porta mittente e destinatario del suo PDU.
-    frames = [f for f in tr.get("trace") or [] if f.get("traffic_type") == "ICMP" and f.get("status") != "buffered"
-              and {f.get("source"), f.get("destination")} == {src, dst}]
-    peer = {}  # (dispositivo, porta) → (vicino, sua porta)
-    for l in topo.links:
-        peer[(l["a"], l["pa"])] = (l["b"], l["pb"])
-        peer[(l["b"], l["pb"])] = (l["a"], l["pa"])
-    cur = next((f for f in frames if f.get("device") == src and f.get("previous_device") is None), None)
-    hops: list[dict] = []
-    leg, reached = "andata", False
-    while cur and len(hops) < 24:
-        dec = cur.get("decisions") or []
-        hops.append({"leg": leg, "device": cur.get("device"), "in": cur.get("in_port"), "out": cur.get("out_port"),
-                     "status": cur.get("status"), "note": dec[-1]["description"] if dec else ""})
-        if cur.get("status") == "dropped" or (reached and cur.get("device") == src):
-            break  # scartato, oppure la risposta è tornata a casa
-        if cur.get("device") == dst:
-            reached, leg = True, "ritorno"
-        nxt_dev, nxt_port = peer.get((cur.get("device"), cur.get("out_port")), (None, None))
-        cur = next((f for f in frames if f.get("index", 0) > cur.get("index", 0)
-                    and f.get("device") == nxt_dev and f.get("in_port") == nxt_port), None)
-    drop = next((x for x in tr.get("failures") or [] if x.get("status") == "dropped"), None)
-    blocked = {"device": drop.get("device"), "reason": drop.get("reason")} if drop else None
-    return {"from": src, "to": dst, "delivered": blocked is None and reached,
-            "blocked_by": blocked, "hops": hops}
-
-
-# Svuota la simulazione: cancella i PDU creati con «Add Simple PDU» e la riporta all'inizio.
-# Misurato su PT 9.0.1: il solo reset NON svuota la lista eventi (i PDU restano nello scenario e ogni traccia
-# ne aggiungerebbe altri, che consumano i passi delle tracce successive); deletePDU(0) ripetuto + reset sì.
-# Firma di deletePDU non documentata: chiamata dentro try/catch, testo fisso senza input dell'utente.
-CLEAR_SIM_JS = (
-    "try{var u=ipc.appWindow().getUserCreatedPDU();var s=ipc.simulation();s.setSimulationMode(true);"
-    "for(var i=0;i<50;i++){try{u.deletePDU(0);}catch(e){}}try{s.resetSimulation();}catch(e){}"
-    "reportResult('frames='+s.getFrameInstanceCount());}catch(e){reportResult('ERR '+e);}"
-)
-
-
-async def clear_simulation(realtime: bool) -> None:
-    """Svuota la lista eventi della simulazione; con realtime=True riporta PT in Realtime."""
-    try:
-        await pt.call("pt_send_raw", {"js_code": CLEAR_SIM_JS, "wait_result": True}, 30)
-    finally:
-        if realtime:
-            await pt.call("pt_simulation_mode", {"on": False}, 30)
-            await sblocca_limiti()
-
-
-# Limiti di velocità attivi, {router: {porta: policy}}: li aggiornano leggi_limiti e /api/router/ratelimit.
-# Misurato su PT 9 (2911): dopo un passaggio in Simulation (sniffer, tracce delle verifiche) una porta con
-# «service-policy output» (shape average) resta bloccata e scarta tutto, anche i ping. Togliere e rimettere la
-# policy la sblocca: lo si fa ogni volta che PT torna in Realtime.
-def limiti_attivi() -> dict[str, dict[str, str]]:
-    return STATE.setdefault("limiti_attivi", {})   # nello Stato: sopravvive al riavvio del server
-
-
-async def sblocca_limiti() -> None:
-    for router, porte in list(limiti_attivi().items()):
-        if not porte or not pt.topo.dev(router):
-            continue
-        righe = ["enable", "configure terminal"]
-        for porta, policy in porte.items():
-            righe += [f"interface {porta}", f"no service-policy output {policy}", f"service-policy output {policy}", "exit"]
-        try:
-            await console(router, righe + ["end"], 30)
-        except Exception as e:  # un router sparito o protetto non deve far fallire la traccia
-            log(f"Limiti di {router} non riattivati: {e}", "info")
+    return await motore.browse(host, url)
 
 
 async def a_trace(b):
     """POST /api/trace — Body: {"from", "to"} (nomi di dispositivi). Segue un ping passo per passo.
 
-    Svuota la simulazione, manda un ping (Add Simple PDU) in modalità Simulation, legge il percorso, poi
-    svuota di nuovo e torna sempre in Realtime: PT resta come prima. Dice dove e perché un pacchetto viene
-    scartato: per le ACL riporta la riga che l'ha bloccato. Se il primo ping muore sull'ARP lo ripete.
-    Packet Tracer: pt_send_pdu + pt_simulation_mode. Risposta: Stato + {"trace": {...}} (trace_summary).
+    Dice dove e perché un pacchetto viene scartato: per le ACL riporta la riga che l'ha bloccato
+    (rete/percorso.py); nella rete vera un ping conferma il verdetto. Risposta: Stato + {"trace": {...}}.
     """
     a = need(("pc", "server", "router"), b.get("from", ""))
     c = need(("pc", "server", "router"), b.get("to", ""))
@@ -1864,32 +1675,15 @@ async def a_trace(b):
 
 
 async def do_trace(src: str, dst: str) -> dict:
-    """Traccia di un ping da src a dst (nomi di dispositivi), già riassunta da trace_summary. Usata anche dai livelli."""
-    await pt.settle()
-    t: dict = {}
-    for attempt in range(2):
-        try:
-            await clear_simulation(realtime=False)
-            out = await pt.call("pt_send_pdu", {"source": src, "destination": dst,
-                                                 "simulation": True, "steps": 20}, 120)
-        finally:
-            await clear_simulation(realtime=True)
-        raw = mcp_json(out)
-        if not raw:
-            raise ValueError(f"traccia non riuscita: {out[:200]}")
-        t = trace_summary(raw, src, dst, pt.topo)
-        # Il primo pacchetto verso un indirizzo nuovo muore aspettando l'ARP (misurato): non è un blocco.
-        # Ora l'ARP è risolto, quindi si ripete una volta.
-        if not (t["blocked_by"] and "ARP" in (t["blocked_by"]["reason"] or "")):
-            break
-    return t
+    """Traccia di un ping da src a dst (nomi di dispositivi). Usata anche dai livelli."""
+    return await motore.trace(src, dst)
 
 
 async def a_port_security(b):
     """POST /api/switch/port-security — Body: {"name", "port", "max_mac"?, "violation"?, "sticky"?}.
 
-    Limita quanti dispositivi possono usare una porta dello switch. Packet Tracer: pt_apply_port_security.
-    IOS: switchport port-security · maximum · violation · mac-address sticky.
+    Limita quanti dispositivi possono usare una porta dello switch.
+    Console: switchport mode access · switchport port-security · maximum · violation · mac-address sticky.
     """
     d = need("switch", b.get("name", ""))
     p = need_port(d, b.get("port", ""))
@@ -1902,9 +1696,9 @@ async def a_port_security(b):
     if violation not in VIOLATIONS:
         raise ValueError("«violation» deve essere shutdown, restrict o protect")
     sticky = need_bool(b, "sticky") if "sticky" in b else True
-    mcp_checked(await pt.call("pt_apply_port_security", {"switch": d["name"], "port": p["n"], "max_mac": mx,
-                                                         "violation": violation, "sticky": sticky}, 90),
-                "port-security")
+    await configura(d["name"], [f"interface {p['n']}", "switchport mode access", "switchport port-security",
+                          f"switchport port-security maximum {mx}", f"switchport port-security violation {violation}",
+                          f"{'' if sticky else 'no '}switchport port-security mac-address sticky"], "port-security")
     log(f"{d['name']} {short_port(p['n'])}: port-security (max {mx}, {violation})", "config")
 
 
@@ -1913,11 +1707,11 @@ async def a_harden(b):
 
     Body (tutto facoltativo, almeno un campo): {"name", "enable_secret", "users": [{"username", "secret",
     "privilege"?}], "ssh": {"domain", "modulus"?}, "banner", "password_encryption": bool}.
-    Packet Tracer: pt_apply_hardening; la parte SSH la scrive questo endpoint (dominio, chiavi RSA,
-    SSH v2, linee vty solo SSH con login locale) perché la sintassi dell'MCP per le chiavi è rifiutata da PT.
+    Diventa righe di console: enable secret, username … secret, line con 0 / line vty 0 4 con login local,
+    banner motd, service password-encryption; con «ssh» dominio, chiavi RSA, SSH v2 e vty solo SSH.
 
     Con degli utenti la console stessa chiede utente e password: il server salva le credenziali
-    (STATE["credentials"]) e da lì in poi fa il login da solo. Le password restano dentro la simulazione,
+    (STATE["credentials"]) e da lì in poi fa il login da solo. Le password restano dentro la rete del gioco,
     non finiscono nel diario e non escono mai dall'API.
     """
     d = need(("router", "switch"), b.get("name", ""))
@@ -1948,7 +1742,7 @@ async def a_harden(b):
         modulus = ssh.get("modulus", 1024)
         if modulus not in (512, 768, 1024, 2048):
             raise ValueError("«modulus» ammessi: 512, 768, 1024, 2048")
-        # Le chiavi RSA prendono il nome da hostname.dominio e IOS le rifiuta con l'hostname «Router».
+        # Le chiavi RSA prendono il nome da hostname.dominio: l'hostname diventa il nome del dispositivo.
         ssh_lines = [f"hostname {d['name']}", f"ip domain-name {ssh['domain']}",
                      f"crypto key generate rsa general-keys modulus {modulus}",
                      "ip ssh version 2", "line vty 0 4", "transport input ssh", "login local", "exit"]
@@ -1961,7 +1755,16 @@ async def a_harden(b):
     if len(args) == 1 and not b.get("ssh"):
         raise ValueError("indica almeno una cosa da configurare")
     if len(args) > 1:
-        mcp_checked(await pt.call("pt_apply_hardening", args, 180), f"hardening di {d['name']}")
+        righe = []
+        if args.get("enable_secret"):
+            righe.append(f"enable secret {args['enable_secret']}")
+        for u in args.get("users", []):
+            righe.append(f"username {u['username']} privilege {u['privilege']} secret {u['secret']}")
+        if args.get("banner_motd"):
+            righe.append(f"banner motd #{args['banner_motd']}#")
+        if "service_password_encryption" in args:
+            righe.append(("" if args["service_password_encryption"] else "no ") + "service password-encryption")
+        await configura(d["name"], righe, f"hardening di {d['name']}")
     # Credenziali per i prossimi comandi da console: l'utente più privilegiato e la password di enable.
     creds = dict(STATE["credentials"].get(d["name"], {}))
     if args.get("users"):
@@ -1972,8 +1775,12 @@ async def a_harden(b):
     if creds:
         STATE["credentials"][d["name"]] = creds
         save()
+    if args.get("users"):   # da qui in poi la console chiede utente e password (il gioco entra con creds)
+        await configura(d["name"], ["line con 0", "login local", "exit", "line vty 0 4", "login local", "exit"],
+                  f"login su {d['name']}")
+        motore.console.chiudi(d["name"])
     if b.get("ssh"):
-        await ios(d["name"], ssh_lines, f"SSH su {d['name']}")
+        await configura(d["name"], ssh_lines, f"SSH su {d['name']}")
     done = [k for k in ("enable_secret", "users", "banner_motd", "service_password_encryption") if k in args]
     done += ["ssh"] if b.get("ssh") else []
     log(f"{d['name']}: hardening ({', '.join(done)})", "config")
@@ -1996,10 +1803,8 @@ async def a_login(b):
             creds[k] = v
     if not creds:
         raise ValueError("indica almeno utente e password o la password di enable")
-    try:
-        await pt.unlock(d["name"], creds)
-    except PTError as e:
-        raise ValueError(str(e))
+    motore.console.chiudi(d["name"])
+    await motore.unlock(d["name"], creds)
     STATE["credentials"][d["name"]] = creds
     save()
     log(f"{d['name']}: login riuscito", "ok")
@@ -2009,8 +1814,8 @@ async def a_login(b):
 async def a_audit(b):
     """POST /api/audit — Body: {"name"?}. Controlla la sicurezza della configurazione di router e switch.
 
-    Senza «name» controlla tutti. Packet Tracer: pt_audit_security (le password non escono mai dal
-    dispositivo). Risposta: Stato + {"audit": {"secure", "counts", "findings": [...]}}.
+    Senza «name» controlla tutti (le password non escono mai dal dispositivo).
+    Risposta: Stato + {"audit": {"secure", "counts", "findings": [...]}}.
     """
     device = need(("router", "switch"), b["name"])["name"] if b.get("name") else ""
     audit = await do_audit(device)
@@ -2020,15 +1825,12 @@ async def a_audit(b):
 
 async def do_audit(device: str = "") -> dict:
     """Audit di sicurezza di un dispositivo (vuoto = tutti), con i messaggi in italiano. Usata anche dai livelli."""
-    r = mcp_json(await pt.call("pt_audit_security", {"device": device} if device else {}, 120))
-    if "findings" not in r:
-        raise ValueError("audit non riuscito")
     findings = []
-    for f in r["findings"]:
-        m = re.search(r"user '([^']+)'", f.get("message", ""))  # il nome dell'utente sta nel messaggio inglese
-        msg = AUDIT_IT.get(f.get("code"), f.get("message", "")).replace("{utente}", m.group(1) if m else "?")
-        findings.append({"device": f.get("device"), "code": f.get("code"), "severity": f.get("severity"), "message": msg})
-    return {"secure": bool(r.get("secure")), "counts": r.get("counts", {}), "findings": findings}
+    for f in motore.audit(device):
+        msg = AUDIT_IT.get(f["code"], f["code"]).replace("{utente}", f.get("user", "?"))
+        findings.append({"device": f["device"], "code": f["code"], "severity": f["severity"], "message": msg})
+    counts = {k: sum(1 for f in findings if f["severity"] == k) for k in ("high", "medium", "low")}
+    return {"secure": not findings, "counts": counts, "findings": findings}
 
 
 USER_RE = re.compile(r"^[A-Za-z0-9_.-]{1,32}$")
@@ -2036,23 +1838,23 @@ USER_LINE_RE = re.compile(r"^username (\S+)(?: privilege (\d+))?.*? (password|se
 
 
 async def leggi_utenti(device: str) -> list[dict]:
-    """Utenti locali di un router o switch, letti dalla configurazione: niente password, solo come sono salvate.
+    """Utenti locali di un router o switch: niente password, solo come sono salvate.
 
     storage: "chiaro" (password 0), "reversibile" (password 7: nascosta ma decodificabile), "cifrata" (secret).
     """
-    good, out = await console(device, ["enable", "show running-config | include username"], 30)
-    users = []
-    for name, priv, kind, typ in USER_LINE_RE.findall(out + "\n"):
-        storage = "cifrata" if kind == "secret" else ("chiaro" if typ == "0" else "reversibile")
-        users.append({"username": name, "privilege": int(priv or 1), "storage": storage})
-    return users
+    d = motore.rete.dev(device)
+    out = []
+    for nome, u in (d.utenti if d else {}).items():
+        storage = "cifrata" if u["tipo"] == "secret" else ("reversibile" if d.cifra_password else "chiaro")
+        out.append({"username": nome, "privilege": int(u.get("privilege", 1)), "storage": storage})
+    return out
 
 
 async def a_users(b):
     """POST /api/device/users — Body: {"name"}. Gli utenti locali di un router o switch.
 
     Risposta: Stato + {"users": [{"username", "privilege", "storage": "chiaro"|"reversibile"|"cifrata"}]}.
-    Le password non escono mai: si dice solo come sono salvate. IOS: show running-config | include username.
+    Le password non escono mai: si dice solo come sono salvate.
     """
     d = need(("router", "switch"), b.get("name", ""))
     return {"users": await leggi_utenti(d["name"])}
@@ -2073,7 +1875,7 @@ async def a_user_remove(b):
                          f"toglierlo la chiuderebbe fuori.")
     if user not in {u["username"] for u in await leggi_utenti(d["name"])}:
         raise ValueError(f"{d['name']} non ha un utente «{user}»")
-    await ios(d["name"], [f"no username {user}"], f"rimozione dell'utente {user}")
+    await configura(d["name"], [f"no username {user}"], f"rimozione dell'utente {user}")
     log(f"{d['name']}: utente {user} cancellato", "config")
     return {"users": await leggi_utenti(d["name"])}
 
@@ -2081,12 +1883,11 @@ async def a_user_remove(b):
 async def a_power(b):
     """POST /api/device/power — Body: {"name", "on": bool}. Accende o spegne un dispositivo.
 
-    Serve a simulare un guasto o un attacco e vedere se la rete regge. Packet Tracer: pt_device_power.
+    Serve a simulare un guasto o un attacco e vedere se la rete regge.
     """
     d = need(TUTTI, b.get("name", ""))
     on = need_bool(b, "on")
-    await pt.call("pt_device_power", {"device": d["name"], "on": on}, 120)
-    pt.links_dirty = True
+    await motore.power(d["name"], on)
     log(f"{d['name']} {'acceso' if on else 'spento'}", "config")
 
 
@@ -2094,7 +1895,7 @@ async def a_hsrp(b):
     """POST /api/router/hsrp — Body: {"name", "port", "group", "virtual_ip", "priority"?, "preempt"?}.
 
     Due router con lo stesso gruppo e lo stesso virtual_ip fanno da gateway di scorta l'uno all'altro;
-    il gateway dei PC diventa virtual_ip. Packet Tracer: pt_apply_hsrp (versione 2, ogni riga verificata).
+    il gateway dei PC diventa virtual_ip. Console: standby version 2 · standby G ip · priority · preempt.
     """
     d = need("router", b.get("name", ""))
     p = need_port(d, b.get("port", ""))
@@ -2105,10 +1906,9 @@ async def a_hsrp(b):
         raise ValueError("«group» da 0 a 4095, «priority» da 0 a 255")
     vip = ip_of(b.get("virtual_ip"), "IP virtuale")
     preempt = need_bool(b, "preempt") if "preempt" in b else True
-    mcp_checked(await pt.call("pt_apply_hsrp", {"router": d["name"], "interface": p["n"], "group": group,
-                                                "virtual_ip": vip, "priority": prio, "preempt": preempt}, 120),
-                f"HSRP su {d['name']}")
-    pt.links_dirty = True
+    await configura(d["name"], [f"interface {p['n']}", "standby version 2", f"standby {group} ip {vip}",
+                          f"standby {group} priority {prio}", f"{'' if preempt else 'no '}standby {group} preempt"],
+              f"HSRP su {d['name']}")
     log(f"{d['name']} {short_port(p['n'])}: HSRP gruppo {group}, IP virtuale {vip}, priorità {prio}", "config")
 
 
@@ -2117,47 +1917,18 @@ ZONE_RE = re.compile(r"^[a-z][a-z0-9_-]{0,19}$")
 LIVELLI_ZONA = {"inside": 100, "dmz": 50, "outside": 0}   # livelli proposti per i nomi di zona classici
 
 
-def raw_json(out: str):
-    """Il valore restituito con reportResult(JSON.stringify(...)) da pt_send_raw (anche se incapsulato in {"result"})."""
-    v = json.loads(out)
-    if isinstance(v, dict) and isinstance(v.get("result"), str):
-        v = json.loads(v["result"])
-    return v
-
-
-async def asa(device: str, lines: list[tuple[str, str]], what: str) -> None:
-    """Esegue righe sull'ASA con enterCommand(comando, modo) e salva. ValueError alla prima riga rifiutata.
-
-    Misurato su PT 9: l'ASA non ha console per pt_cli; enterCommand funziona su una linea nascosta e tiene il
-    contesto tra una chiamata e l'altra (modo "global" per entrare in configurazione, "" = modo corrente).
-    Stato: 0 ok, 1 ambiguo, 2 non valido, 3 incompleto. Testi fissi o validati, mai input libero del giocatore.
-    """
-    # Misurato: un ASA appena creato rifiuta il primo comando di configurazione; «show version» lo sveglia
-    # (il suo esito si ignora) e, se la prima riga viene rifiutata lo stesso, si riprova una volta.
-    js = ("try{var d=ipc.network().getDevice(" + json.dumps(device) + ");try{d.enterCommand('show version','enable');}catch(e){}"
-          "var L=" + json.dumps(lines + [("write memory", "enable")])
-          + ";var out=[];for(var i=0;i<L.length;i++){var st=-1,tx='';try{var x=d.enterCommand(L[i][0],L[i][1]);"
-          "st=x?x.first:-1;tx=x?String(x.second):'';}catch(e){tx=String(e);}out.push([st,tx.substring(0,160)]);}"
-          "reportResult(JSON.stringify(out));}catch(e){reportResult(JSON.stringify({error:String(e)}));}")
-    # Misurato il 15/11: un ASA aggiunto da meno di ~30 secondi rifiuta i comandi di configurazione (sta ancora
-    # avviandosi). Si fa avanzare il tempo di PT e si riprova, per al massimo ~45 secondi.
-    for tentativo in range(6):
-        res = raw_json(await pt.call("pt_send_raw", {"js_code": js, "wait_result": True}, 60))
-        if isinstance(res, dict):
-            raise ValueError(f"{what}: {res.get('error')}")
-        if not res or res[0][0] == 0 or lines[0][0].startswith(("no ", "clear ")):
-            break
-        if tentativo < 5:
-            await pt.call("pt_fast_forward", {}, 30)
-            await asyncio.sleep(6)
-    for (cmd, _), (st, tx) in zip(lines, res):
-        if st not in (0,) and not cmd.startswith(("no ", "clear ")):
-            raise ValueError(f"{what}: l'ASA ha rifiutato «{cmd}» {tx.strip()[:120]}".strip())
+async def configura_firewall(device: str, lines: list[tuple[str, str]], what: str) -> None:
+    """Righe di configurazione sulla console del firewall: [(comando, modo)] (il modo non serve più e resta per
+    compatibilità con le azioni del pacchetto di gioco). ValueError alla prima riga rifiutata."""
+    good, out = await console(device, ["enable", "configure terminal", *[c for c, _ in lines], "end"])
+    if not good:
+        bad = [l for l in out.splitlines() if l.lstrip().startswith(("%", "ERROR"))]
+        raise ValueError(f"{what}: il firewall ha rifiutato il comando. " + " ".join(bad[:3])[:300])
 
 
 def zone_firewall(d: dict) -> dict[str, FW.Zona]:
     """Le zone di un firewall dalla fotografia: nome → Zona (con la rete della sua porta e quelle raggiunte da
-    lì con le rotte statiche dell'ASA: un firewall tra due router protegge anche le LAN dietro ciascuno)."""
+    lì con le rotte statiche del firewall: un firewall tra due router protegge anche le LAN dietro ciascuno)."""
     out = {}
     fw = d.get("fw", {})
     for z in fw.get("zones", []):
@@ -2176,9 +1947,9 @@ def zone_firewall(d: dict) -> dict[str, FW.Zona]:
 
 
 async def a_fw_route(b):
-    """POST /api/firewall/route — Body: {"name", "network", "mask", "via", "remove"?}. Rotta statica dell'ASA.
+    """POST /api/firewall/route — Body: {"name", "network", "mask", "via", "remove"?}. Rotta statica del firewall.
 
-    ASA: [no] route <zona> <rete> <maschera> <via>. La zona è quella della porta nella cui rete sta «via»
+    Console: [no] route <zona> <rete> <maschera> <via>. La zona è quella della porta nella cui rete sta «via»
     (il router vicino). Le regole vengono ricompilate: la zona ora comprende anche quella rete.
     """
     d = need("firewall", b.get("name", ""))
@@ -2195,10 +1966,9 @@ async def a_fw_route(b):
         raise ValueError(f"{via} non è nella rete di nessuna zona di {d['name']}: il next hop dev'essere il router "
                          f"collegato a una porta del firewall.")
     neg = "no " if b.get("remove") else ""
-    await asa(d["name"], [(f"{neg}route {zona} {net} {mask} {via}", "global")], f"rotta su {d['name']}")
+    await configura_firewall(d["name"], [(f"{neg}route {zona} {net} {mask} {via}", "global")], f"rotta su {d['name']}")
     log(f"{d['name']}: {'tolta' if neg else 'aggiunta'} rotta {net}/{mask} via {via} ({zona})", "config")
-    pt.links_dirty = True
-    d = (await pt.refresh()).dev(d["name"])
+    d = (await motore.refresh()).dev(d["name"])
     try:
         await applica_regole(d)
     except ValueError as e:
@@ -2206,7 +1976,7 @@ async def a_fw_route(b):
 
 
 async def applica_regole(d: dict) -> int:
-    """Compila le regole salvate del firewall d (STATE["firewall"]) e le scrive sull'ASA. Restituisce quante righe."""
+    """Compila le regole salvate del firewall d (STATE["firewall"]) e le scrive sul firewall. Restituisce quante righe."""
     zone = zone_firewall(d)
     regole = [FW.valida_regola(r, zone, i) for i, r in enumerate(STATE["firewall"].get(d["name"], []), 1)]
     acl = FW.compila(zone, regole)
@@ -2227,7 +1997,7 @@ async def applica_regole(d: dict) -> int:
         lines.append((f"access-group {nome} in interface {zona}", "global"))
         totale += len(righe)
     if lines:
-        await asa(d["name"], lines, f"regole di {d['name']}")
+        await configura_firewall(d["name"], lines, f"regole di {d['name']}")
     return totale
 
 
@@ -2241,7 +2011,7 @@ async def a_fw_zone(b):
     d = need("firewall", b.get("name", ""))
     p = need_port(d, b.get("port", ""))
     if b.get("clear"):
-        await asa(d["name"], [(f"interface {p['n']}", "global"), ("no nameif", ""), ("no security-level", ""),
+        await configura_firewall(d["name"], [(f"interface {p['n']}", "global"), ("no nameif", ""), ("no security-level", ""),
                               ("no ip address", ""), ("shutdown", ""), ("exit", "")], f"{d['name']} {p['n']}")
         log(f"{d['name']} {short_port(p['n'])}: zona tolta", "config")
     else:
@@ -2257,11 +2027,10 @@ async def a_fw_zone(b):
         altra = next((z for z in d.get("fw", {}).get("zones", []) if z["nameif"] == zona and z["port"] != p["n"]), None)
         if altra:
             raise ValueError(f"la zona «{zona}» è già sulla porta {short_port(altra['port'])}")
-        await asa(d["name"], [(f"interface {p['n']}", "global"), (f"nameif {zona}", ""), (f"security-level {level}", ""),
+        await configura_firewall(d["name"], [(f"interface {p['n']}", "global"), (f"nameif {zona}", ""), (f"security-level {level}", ""),
                               (f"ip address {ip} {mask}", ""), ("no shutdown", ""), ("exit", "")], f"{d['name']} {p['n']}")
         log(f"{d['name']} {short_port(p['n'])}: zona {zona} (livello {level}), {ip}", "config")
-    pt.links_dirty = True
-    d = (await pt.refresh()).dev(d["name"])
+    d = (await motore.refresh()).dev(d["name"])
     try:
         await applica_regole(d)
     except ValueError as e:  # una regola che nomina una zona sparita: la zona è cambiata comunque, lo diciamo
@@ -2274,7 +2043,7 @@ async def a_fw_rules(b):
     Regola: {"from", "to", "action": "permit"|"deny", "protocol"?: ip|tcp|udp|icmp, "port"?, "source"?, "dest"?}.
     from/to sono zone; source/dest vuoti = tutta la zona, oppure any, un IP, una rete a.b.c.d/nn.
     Le regole sono eccezioni al comportamento di base (le zone alte aprono verso le basse); firewall.py le
-    compila in ACL dell'ASA con le risposte. Risposta: Stato + {"acl": {zona: righe}} (cosa è finito sull'ASA).
+    compila in access-list del firewall con le risposte. Risposta: Stato + {"acl": {zona: righe}} (cosa è finito sul firewall).
     """
     d = need("firewall", b.get("name", ""))
     rules = b.get("rules")
@@ -2304,60 +2073,40 @@ DNS_NOME_RE = re.compile(r"^(?=.{1,80}$)[a-z0-9]([a-z0-9-]{0,40}[a-z0-9])?(\.[a-
 async def a_server_dns(b):
     """POST /api/server/dns — Body: {"name", "on"?: bool, "add"?: [{"name", "ip"}], "remove"?: [nomi]}.
 
-    Il servizio DNS di un Server-PT: lo accende o spegne e aggiunge o toglie record A (nome → IP). I record sono
-    anche in STATE["dns"] (Packet Tracer non li fa rileggere). Packet Tracer: pt_server_dns.
-    Risposta: Stato + {"dns": {"on", "records": {nome: ip}}}.
+    Il servizio DNS di un server: lo accende o spegne e aggiunge o toglie record A (nome → IP). I record sono
+    anche in STATE["dns"], che il client mostra. Risposta: Stato + {"dns": {"on", "records": {nome: ip}}}.
     """
     d = need("server", b.get("name", ""))
     add, rem = b.get("add") or [], b.get("remove") or []
     if not isinstance(add, list) or not isinstance(rem, list) or len(add) + len(rem) > 20:
         raise ValueError("record non validi (al massimo 20 per volta)")
-    nuovi = []
+    nuovi = {}
     for r in add:
         nome = str((r or {}).get("name", "")).strip().lower().rstrip(".")
         if not DNS_NOME_RE.match(nome):
             raise ValueError(f"«{nome}» non è un nome valido: parole separate da punti, es. gestione.azienda.test")
-        nuovi.append({"name": nome, "type": "A", "value": ip_of((r or {}).get("ip"), f"IP di {nome}")})
+        nuovi[nome] = ip_of((r or {}).get("ip"), f"IP di {nome}")
     via = [str(x).strip().lower().rstrip(".") for x in rem]
-    mio = STATE["dns"].setdefault(d["name"], {"on": False, "records": {}})
-    args = {"device": d["name"], "enable": None}
-    if "on" in b:
-        args["enable"] = bool(b["on"])
-    if nuovi:
-        args["records"] = nuovi
-    if via:
-        args["remove"] = [{"name": n, "type": "A", "value": mio["records"].get(n, "")} for n in via if n in mio["records"]]
-    out = await pt.call("pt_server_dns", args, 60)
-    if "error" in out.lower() and "stored" not in out.lower():
-        raise ValueError(f"Packet Tracer non ha accettato i record: {out[:160]}")
-    for n in via:
-        mio["records"].pop(n, None)
-    for r in nuovi:
-        mio["records"][r["name"]] = r["value"]
-    if "on" in b:
-        mio["on"] = bool(b["on"])
+    acceso = bool(b["on"]) if "on" in b else None
+    dns = await motore.server_dns(d["name"], acceso, nuovi, via)
+    STATE["dns"][d["name"]] = {"on": dns["on"], "records": dict(dns["records"])}
     save()
-    parti = ([f"DNS {'acceso' if mio['on'] else 'spento'}"] if "on" in b else []) + \
-            [f"{r['name']} → {r['value']}" for r in nuovi] + [f"tolto {n}" for n in via]
+    parti = ([f"DNS {'acceso' if dns['on'] else 'spento'}"] if "on" in b else []) + \
+            [f"{n} → {ip}" for n, ip in nuovi.items()] + [f"tolto {n}" for n in via]
     log(f"{d['name']}: " + ", ".join(parti), "config")
-    return {"dns": mio}
+    return {"dns": STATE["dns"][d["name"]]}
 
 
 async def leggi_servizi(device: str) -> dict:
-    """I servizi di un Server-PT: {"http", "https", "ftp", "smtp", "pop3": bool, "ftp_users": [...], "domain"}."""
-    h = mcp_json(await pt.call("pt_server_http", {"device": device, "enable": None, "https_enable": None}, 60))
-    f = mcp_json(await pt.call("pt_server_service", {"device": device, "service": "ftp"}, 60))
-    e = mcp_json(await pt.call("pt_server_service", {"device": device, "service": "email"}, 60))
-    return {"http": bool(h.get("http")), "https": bool(h.get("https")), "ftp": bool(f.get("enabled")),
-            "smtp": bool(e.get("enabled") and e.get("smtp")), "pop3": bool(e.get("enabled") and e.get("pop3")),
-            "ftp_users": f.get("users") or [], "domain": e.get("domain") or ""}
+    """I servizi di un server: {"http", "https", "ftp", "smtp", "pop3": bool, "ftp_users": [...], "domain"}."""
+    return motore.servizi(device)
 
 
 async def a_services(b):
     """POST /api/server/services — Body: {"name"}. I servizi esposti da un server (porte aperte).
 
     Risposta: Stato + {"services": {"http", "https", "ftp", "smtp", "pop3": bool, "ftp_users", "domain"}}.
-    Porte: http 80, https 443, ftp 21, smtp 25, pop3 110. SSH non è un servizio di Server-PT: è dei router
+    Porte: http 80, https 443, ftp 21, smtp 25, pop3 110. SSH non è un servizio dei server: è dei router
     (/api/device/harden con «ssh»).
     """
     d = need("server", b.get("name", ""))
@@ -2367,28 +2116,18 @@ async def a_services(b):
 async def a_service(b):
     """POST /api/server/service — Body: {"name", "service": http|https|ftp|email, "on": bool, "domain"?}.
 
-    Accende o spegne un servizio di un Server-PT (email = SMTP e POP3 insieme). Risposta: Stato + {"services"}.
-    Packet Tracer: pt_server_http, pt_server_service.
+    Accende o spegne un servizio di un server (email = SMTP e POP3 insieme). Risposta: Stato + {"services"}.
     """
     d = need("server", b.get("name", ""))
     svc, on = b.get("service"), need_bool(b, "on")
     if svc not in SERVIZI:
         raise ValueError(f"servizio tra {', '.join(SERVIZI)}")
-    if svc in ("http", "https"):
-        args = {"device": d["name"], "enable": None, "https_enable": None}
-        args["enable" if svc == "http" else "https_enable"] = on
-        r = mcp_json(await pt.call("pt_server_http", args, 60))
-        if r.get("ok") is False:
-            raise ValueError("Packet Tracer non riaccende HTTP e HTTPS se sono spenti tutti e due: "
-                             "riaccendine uno dalla scheda Services del server.")
-    else:
-        args = {"device": d["name"], "service": svc, "enable": on}
-        if svc == "email" and b.get("domain"):
-            dom = str(b["domain"]).strip()
-            if not re.fullmatch(r"[A-Za-z0-9.-]{1,60}", dom):
-                raise ValueError("dominio non valido, es. pinguini.local")
-            args["domain"] = dom
-        await pt.call("pt_server_service", args, 60)
+    dominio = ""
+    if svc == "email" and b.get("domain"):
+        dominio = str(b["domain"]).strip()
+        if not re.fullmatch(r"[A-Za-z0-9.-]{1,60}", dominio):
+            raise ValueError("dominio non valido, es. pinguini.local")
+    await motore.servizio(d["name"], svc, on, dominio)
     log(f"{d['name']}: servizio {svc} {'acceso' if on else 'spento'}", "config")
     return {"services": await leggi_servizi(d["name"])}
 
@@ -2398,42 +2137,18 @@ PORTE_NOTE = {21: "FTP", 22: "SSH", 23: "Telnet", 25: "SMTP", 53: "DNS", 80: "HT
 PORTE_SCANSIONE = [21, 22, 23, 25, 80, 110, 443]
 
 
-SBLOCCA_JS = ("try{var c=ipc.network().getDevice(__HOST__).getCommandLine();"
-              "try{c.enterChar(30,0);c.enterChar(120,0);}catch(e){}try{c.enterChar(29,0);}catch(e){}"
-              "try{c.enterChar(3,0);}catch(e){}reportResult(String(c.getPrompt()));}catch(e){reportResult('ERR '+e);}")
-
-
-NSLOOKUP_RE = re.compile(r"Address:\s*([\d.]+)")
-
-
 async def nslookup(src: str, nome: str) -> tuple[str, str]:
-    """nslookup dal PC src: (IP a cui porta il nome, IP del DNS che ha risposto); "" se non si risolve.
-
-    Packet Tracer stampa «Server: [ip]», «Address: ip» (il DNS), poi «Name: …» e «Address: ip» (la risposta).
-    """
-    await scalda_dns(src)
-    out = await comando_host(src, f"nslookup {nome}", 30)
-    indirizzi = NSLOOKUP_RE.findall(out)
-    if len(indirizzi) < 2 or "Name:" not in out:
-        return "", indirizzi[0] if indirizzi else ""
-    return indirizzi[-1], indirizzi[0]
+    """nslookup dal PC src: (IP a cui porta il nome, IP del DNS che ha risposto); "" se non si risolve."""
+    return await motore.nslookup(src, nome)
 
 
 async def sonda_porta(src: str, ip: str, porta: int) -> str:
-    """Prova ad aprire una connessione TCP da src verso ip:porta con Telnet: "aperta", "chiusa" o "filtrata".
+    """Prova ad aprire una connessione TCP da src verso ip:porta: "aperta", "chiusa" o "filtrata".
 
-    Misurato su PT 9: «...Open» = qualcuno ascolta; «Connection refused» = l'host risponde ma lì non c'è
-    nessuno; «timed out» = nessuna risposta (un firewall o un'ACL scarta, o l'host non c'è).
+    aperta = qualcuno ascolta; chiusa = l'host risponde ma lì non c'è nessuno; filtrata = nessuna risposta
+    (un firewall o un'ACL scarta, o l'host non c'è).
     """
-    out = await pt.call("pt_host_command", {"device": src, "command": f"telnet {ip} {porta}", "timeout": 14}, 60)
-    # Misurato: dopo «Open» la sessione resta aperta (un server FTP aspetta comandi) e la console del PC non
-    # risponde più a niente. Ctrl+Shift+6 x (uscita Telnet di Cisco), Ctrl+] e Ctrl+C la liberano.
-    await pt.call("pt_send_raw", {"js_code": SBLOCCA_JS.replace("__HOST__", json.dumps(src)), "wait_result": True}, 30)
-    if "Open" in out:
-        return "aperta"
-    if "refused" in out:
-        return "chiusa"
-    return "filtrata"
+    return await motore.porta(src, ip, porta)
 
 
 def j_scan(b):
@@ -2441,7 +2156,7 @@ def j_scan(b):
 
     from: PC o server da cui partire; to: IP o nome di un dispositivo; ports: lista (default PORTE_SCANSIONE,
     al massimo 10). Risultato del lavoro: {"ok", "message", "scan": {"target", "ip", "ports": [{"port",
-    "service", "state": "aperta"|"chiusa"|"filtrata"}]}}. Una porta filtrata costa ~14 s.
+    "service", "state": "aperta"|"chiusa"|"filtrata"}]}}. Una porta filtrata costa ~3 s.
     """
     src = need(("pc", "server"), b.get("from", ""))["name"]
     target = str(b.get("to", "")).strip()
@@ -2453,12 +2168,12 @@ def j_scan(b):
         raise ValueError("porte non valide (1-65535, al massimo 10)")
 
     async def run(job: Job) -> dict:
-        t = await pt.refresh()
+        t = await motore.refresh()
         ip = target if re.fullmatch(r"[\d.]+", target) else R.resolve(t, "@" + target)
         if not ip:
             raise ValueError(f"{target}: né un IP né un dispositivo con un indirizzo")
         ip = ip_of(ip, "destinazione")
-        await pt.settle()
+        await motore.settle()
         risultati = []
         for porta in ports:
             job.step(f"Porta {porta} ({PORTE_NOTE.get(porta, 'TCP')}) di {ip}")
@@ -2470,56 +2185,7 @@ def j_scan(b):
     return start_job(f"Scansione di {target}", run)
 
 
-# Traffico di prova per lo sniffer, generato in Simulation con metodi misurati su PT 9: HttpClient.go(url) per
-# il web, la linea di comando del PC (ping, telnet IP porta) per il resto. Comandi validati, mai testo libero.
-SNIFF_STEPS = 60
-TRAFFICO_RE = R.TRAFFICO_RE
-
-
-def js_traffico(voci: list[tuple[str, str]]) -> str:
-    """JS che fa partire il traffico: [(dispositivo, "ping IP" | "telnet IP [porta]" | "web URL")]."""
-    return ("try{var L=" + json.dumps(voci) + ";var n=ipc.network();for(var i=0;i<L.length;i++){var d=n.getDevice(L[i][0]);"
-            "if(!d)continue;var c=L[i][1];try{if(c.indexOf('web ')===0){d.getProcess('HttpClient').go(c.substring(4));}"
-            "else{var cl=d.getCommandLine();try{cl.enterChar(3,0);}catch(e){}cl.enterCommand(c);}}catch(e){}}"
-            "reportResult('ok');}catch(e){reportResult('ERR '+e);}")
-
-
-PORTA_RE = re.compile(r"on port (\d+)|port (\d+)")
-APP_RE = re.compile(r"\b(HTTP|HTTPS|TELNET|SSH|FTP|SMTP|POP3|DNS|DHCP)\b")
-
-
-def flussi_sniffer(trace: list[dict]) -> dict:
-    """(sorgente, destinazione) → (porta, applicazione), letti dove la connessione nasce.
-
-    Misurato su PT 9: solo il dispositivo che apre la connessione scrive «...TCP connection to IP on port N» e
-    il nome del programma («A TELNET client process…»); i router di passaggio non riportano il livello 4.
-    """
-    out = {}
-    for f in trace:
-        testo = " ".join(x.get("description", "") for x in f.get("decisions") or [])
-        porta = next((int(a or b) for a, b in PORTA_RE.findall(testo)), None)
-        app = APP_RE.search(testo.upper())
-        if porta or app:
-            k = (f.get("source"), f.get("destination"))
-            vp, va = out.get(k, (None, ""))
-            out[k] = (vp or porta, va or (app.group(1) if app else ""))
-    return out
-
-
-def riga_sniffer(f: dict, t: Topo, flussi: dict) -> dict:
-    """Un frame della traccia di PT → una riga dello sniffer (come tshark, in italiano)."""
-    src = f.get("source") or ""
-    dst = f.get("destination") or ""
-    porta, app = flussi.get((src, dst), (None, ""))
-    def ip_di(nome):
-        d = t.dev(nome)
-        i = t.iface(d) if d else None
-        return str(i.ip) if i else nome
-    if dst == "HTTP CLIENT":  # PT chiama così il destinatario delle risposte web
-        dst, app = "risposta web", app or "HTTP"
-    return {"n": f.get("index"), "device": f.get("device"), "in": f.get("in_port"), "out": f.get("out_port"),
-            "src": ip_di(src), "src_dev": src if t.dev(src) else "", "dst": ip_di(dst), "dst_dev": dst if t.dev(dst) else "",
-            "proto": f.get("traffic_type") or "", "port": porta, "app": app, "status": f.get("status") or ""}
+TRAFFICO_RE = R.TRAFFICO_RE   # traffico di prova per lo sniffer: «ping IP», «telnet IP porta», «web URL»
 
 
 def j_sniff(b):
@@ -2528,8 +2194,8 @@ def j_sniff(b):
 
     Il traffico è quello del livello in corso (campo «traffico» del livello: il «rumore di fondo» della rete,
     anche quello sospetto) più quello eventualmente chiesto nel body («ping IP», «telnet IP porta», «web URL»).
-    Gira in Simulation per SNIFF_STEPS eventi, poi rimette PT in Realtime e svuota la simulazione.
-    Risultato: {"ok", "message", "capture": {"device", "frames": [riga_sniffer…]}}. Dura 20-40 s.
+    Nella rete vera è tcpdump sul dispositivo mentre gli host generano il traffico (circa 5 s).
+    Risultato: {"ok", "message", "capture": {"device", "frames": [...]}} (formato in docs/API.md).
     """
     d = need(("router", "switch", "firewall", "pc", "server"), b.get("name", ""))
     extra = []
@@ -2541,7 +2207,7 @@ def j_sniff(b):
         extra.append((src, cmd))
 
     async def run(job: Job) -> dict:
-        t = await pt.refresh()
+        t = await motore.refresh()
         lv = G().livelli_per_numero.get(STATE["rescue"]["level"]) if STATE["rescue"]["status"] == "playing" else None
         if lv is None and STATE.get("mode") == "academy":
             lv = missione_corrente(G())   # una challenge con il suo traffico di fondo («traffico» della missione)
@@ -2556,18 +2222,7 @@ def j_sniff(b):
                 if h.get("gw") not in (None, "", "0.0.0.0"):
                     voci.append((h["name"], f"ping {h['gw']}"))
         job.step(f"In ascolto su {d['name']}…")
-        await clear_simulation(realtime=False)
-        try:
-            await pt.call("pt_send_raw", {"js_code": js_traffico(voci), "wait_result": True}, 30)
-            for _ in range(SNIFF_STEPS // 20):
-                await pt.call("pt_simulation_step", {"action": "forward", "times": 20}, 60)
-            raw = mcp_json(await pt.call("pt_read_packet_trace", {"limit": 200, "include_decisions": True}, 90))
-        finally:
-            await clear_simulation(realtime=True)
-        trace = raw.get("trace") or []
-        flussi = flussi_sniffer(trace)
-        frames = [riga_sniffer(f, t, flussi) for f in trace
-                  if f.get("device") == d["name"] and f.get("traffic_type") not in ("STP", "CDP")]
+        frames = await motore.sniff(d["name"], voci)
         log(f"Sniffer su {d['name']}: {len(frames)} pacchetti catturati", "info")
         return {"ok": True, "message": f"{len(frames)} pacchetti catturati su {d['name']}",
                 "capture": {"device": d["name"], "frames": frames}}
@@ -2575,26 +2230,11 @@ def j_sniff(b):
 
 
 async def leggi_limiti(device: str) -> dict:
-    """Limiti di velocità di un router: {porta: kbps}, letti dalla configurazione (policy PTA_LIM_*)."""
-    good, out = await console(device, ["enable", "show running-config"], 30)
-    limiti, cur, policy = {}, None, {}
-    for line in out.splitlines():
-        m = re.match(r"^policy-map (PTA_LIM_\S+)", line)
-        if m:
-            cur = m.group(1)
-            continue
-        m = re.match(r"^\s+shape average (\d+)", line)
-        if m and cur:
-            policy[cur] = int(m.group(1)) // 1000
-        m = re.match(r"^interface (\S+)", line)
-        if m:
-            cur = m.group(1)
-            continue
-        m = re.match(r"^\s+service-policy output (PTA_LIM_\S+)", line)
-        if m and cur:
-            limiti[cur] = m.group(1)
-    limiti_attivi()[device] = dict(limiti)
-    return {porta: policy.get(nome) for porta, nome in limiti.items()}
+    """Limiti di velocità di un router: {porta: kbps} (policy con «shape average» applicate in uscita)."""
+    d = motore.rete.dev(device)
+    if not d:
+        return {}
+    return {p.nome: d.policy.get(p.policy_out) for p in d.porte.values() if p.policy_out}
 
 
 async def a_ratelimit(b):
@@ -2602,8 +2242,7 @@ async def a_ratelimit(b):
 
     Con port e kbps > 0: traffic shaping (policy-map con «shape average», service-policy output). Con kbps 0:
     toglie il limite. Solo name: legge i limiti. Risposta: Stato + {"limits": {porta: kbps}}.
-    Misurato su PT 9 (2911): «rate-limit» e «police» non esistono, «shape average» sì. PT accetta la
-    configurazione ma non ne simula l'effetto sulla velocità: serve a imparare dove e come si mette un limite.
+    Nella rete vera il limite è applicato davvero (tc tbf sulla porta).
     """
     d = need("router", b.get("name", ""))
     if b.get("port"):
@@ -2613,13 +2252,13 @@ async def a_ratelimit(b):
             assert 0 <= kbps <= 1000000
         except Exception:
             raise ValueError("kbps da 0 (nessun limite) a 1000000")
-        nome = "PTA_LIM_" + re.sub(r"[^A-Za-z0-9]", "_", p["n"])
+        nome = "LIMITE_" + re.sub(r"[^A-Za-z0-9]", "_", p["n"])
         if kbps:
-            await ios(d["name"], [f"policy-map {nome}", "class class-default", f"shape average {kbps * 1000}", "exit", "exit",
+            await configura(d["name"], [f"policy-map {nome}", "class class-default", f"shape average {kbps * 1000}", "exit", "exit",
                                   f"interface {p['n']}", f"service-policy output {nome}"], f"limite su {p['n']}")
             log(f"{d['name']} {short_port(p['n'])}: limite di {kbps} kbps in uscita", "config")
         else:
-            await ios(d["name"], [f"interface {p['n']}", f"no service-policy output {nome}", "exit", f"no policy-map {nome}"],
+            await configura(d["name"], [f"interface {p['n']}", f"no service-policy output {nome}", "exit", f"no policy-map {nome}"],
                       f"limite su {p['n']}")
             log(f"{d['name']} {short_port(p['n'])}: limite tolto", "config")
     return {"limits": await leggi_limiti(d["name"])}
@@ -2633,12 +2272,12 @@ def j_academy_check(b):
 
 
 def j_academy_reset(b):
-    """POST /api/academy/reset — lavoro lungo: job_academy_reset. Svuota il tavolo di Packet Tracer!"""
+    """POST /api/academy/reset — lavoro lungo: job_academy_reset. Svuota il tavolo!"""
     return start_job("Nuovo tavolo per l'Accademia", job_academy_reset)
 
 
 async def job_academy_network(job: Job, inizio: bool = False) -> dict:
-    """Lavoro: porta il tavolo alla rete di partenza della missione in corso (il suo .pkt, o tavolo vuoto).
+    """Lavoro: porta il tavolo alla rete di partenza della missione in corso (la sua topologia, o il tavolo vuoto).
     inizio: è la prima preparazione della missione (needs_setup), non un «Ricomincia la challenge»."""
     g = G()
     m = missione_corrente(g)
@@ -2652,7 +2291,7 @@ async def job_academy_network(job: Job, inizio: bool = False) -> dict:
 
 
 def j_academy_network(b):
-    """POST /api/academy/network — Body: {"start": bool}. Lavoro lungo: job_academy_network. Sostituisce la rete in PT!
+    """POST /api/academy/network — Body: {"start": bool}. Lavoro lungo: job_academy_network. Sostituisce la rete che c'è!
 
     «start»: true quando il client prepara il tavolo all'inizio della missione (needs_setup), false o assente per
     «Ricomincia la challenge»: cambia solo il titolo del lavoro.
@@ -2681,7 +2320,7 @@ def g_academy_answer(b):
     """POST /api/academy/answer — Body: {"step": i, "choice": j}. Risponde alla domanda di un passo (da 0).
 
     Risposta: Stato + {"answer": {"correct": bool, "message": "…"}}. La risposta giusta completa il passo; quella
-    sbagliata no (si può riprovare). Non tocca Packet Tracer.
+    sbagliata no (si può riprovare). Non tocca la rete.
     """
     g = G()
     m, i, s = passo_corrente(b, "domanda")
@@ -2699,7 +2338,7 @@ def g_academy_answer(b):
 
 
 async def a_academy_observe(b):
-    """POST /api/academy/observe — Body: {"step": i}. Segue il ping del passo «osserva» nella simulazione di PT
+    """POST /api/academy/observe — Body: {"step": i}. Segue il ping del passo «osserva» passo per passo
     (come /api/trace) e lo mostra al giocatore. Se il ping arriva il passo è fatto.
 
     Risposta: Stato + {"trace": {…come /api/trace…}, "explanation": "…"}. Dura 10–30 secondi.
@@ -2708,12 +2347,12 @@ async def a_academy_observe(b):
     m, i, s = passo_corrente(b, "osserva")
     da, a = s.osserva.get("da", ""), s.osserva.get("a", "")
     if s.osserva.get("coppia"):   # niente nomi nel YAML: la coppia la sceglie il gioco sulla rete che c'è
-        coppia = M.COPPIE[s.osserva["coppia"]](pt.topo)
+        coppia = M.COPPIE[s.osserva["coppia"]](motore.topo)
         if not coppia:
             raise ValueError(g.accademia("niente_da_osservare"))
         da, a = coppia
     for nome in (da, a):
-        if not pt.topo.dev(nome):
+        if not motore.topo.dev(nome):
             raise ValueError(g.accademia("manca_dispositivo", nome=nome))
     tr = await do_trace(da, a)
     if tr["delivered"]:
@@ -2723,7 +2362,7 @@ async def a_academy_observe(b):
 
 
 def j_rescue_start(b):
-    """POST /api/rescue/start — Body: {"level": n}. Lavoro lungo: job_rescue_start. Sostituisce la rete in PT!
+    """POST /api/rescue/start — Body: {"level": n}. Lavoro lungo: job_rescue_start. Sostituisce la rete che c'è!
 
     Se la preparazione fallisce il livello passa allo stato «error» con il motivo in «message».
     """
@@ -2804,10 +2443,10 @@ async def a_campaign_help(b):
     save()
     if a.azioni:
         try:
-            await esegui_azioni(a.azioni, pt.topo)
-            pt.links_dirty = True
-            await pt.settle()
-        except (ValueError, PTError) as e:
+            await esegui_azioni(a.azioni, motore.topo)
+            motore.links_dirty = True
+            await motore.settle()
+        except (ValueError, ErroreRete) as e:
             cs["wallet"] += a.costo
             comprati.remove(a.id)
             save()
@@ -2819,7 +2458,7 @@ async def a_campaign_help(b):
 def g_campaign_reset(b):
     """POST /api/campaign/reset — Body: {}. Riporta la campagna al giorno 1 con il saldo iniziale.
 
-    Non tocca Packet Tracer né l'Accademia e il Pronto Soccorso: i giorni le cui attività risultano già fatte
+    Non tocca la rete né l'Accademia e il Pronto Soccorso: i giorni le cui attività risultano già fatte
     si richiudono alla prossima verifica (per ripartire davvero da zero: «Ricomincia» nell'Accademia).
     """
     STATE["campaign"] = default_state()["campaign"]
@@ -2827,10 +2466,10 @@ def g_campaign_reset(b):
 
 
 def g_collaudo_accademia(b):
-    """POST /api/collaudo/accademia — solo con PTA_COLLAUDO=1. Body: {"done": [id, …]}.
+    """POST /api/collaudo/accademia — solo con PNA_COLLAUDO=1. Body: {"done": [id, …]}.
 
     Cheat per il debug: segna come completate esattamente le missioni indicate (le altre tornano da fare),
-    senza controlli, senza ping e senza punti. Non tocca Packet Tracer.
+    senza controlli, senza ping e senza punti. Non tocca la rete.
     """
     ids = b.get("done")
     if not isinstance(ids, list) or not all(isinstance(x, str) for x in ids):
@@ -2847,7 +2486,7 @@ def g_collaudo_accademia(b):
 
 
 def g_mode(b):
-    """POST /api/mode — Body: {"mode": "academy" | "rescue"}. Cambia la modalità mostrata; non tocca PT."""
+    """POST /api/mode — Body: {"mode": "academy" | "rescue"}. Cambia la modalità mostrata; non tocca la rete."""
     if b.get("mode") not in ("academy", "rescue"):
         raise ValueError("modalità non valida: academy o rescue")
     STATE["mode"] = b["mode"]
@@ -2862,25 +2501,25 @@ async def index(req: Request):
 
 @asynccontextmanager
 async def lifespan(app):
-    """All'avvio apre la sessione MCP verso Packet Tracer e stampa indirizzo e codice; alla chiusura la chiude."""
+    """All'avvio prepara la rete (vera o simulata) e stampa indirizzo e codice; alla chiusura la smonta."""
     try:
-        await pt.start()
+        await motore.start()
     except Exception as e:  # noqa: BLE001
-        pt.ok, pt.status = False, f"MCP non avviato: {e}"
+        motore.ok, motore.status = False, f"rete non avviata: {e}"
     codice = ACCESS_CODE if LOGIN_REQUIRED else "nessuno (si gioca solo da questo computer)"
-    print(f"\n  PT Academy → http://127.0.0.1:{PORT}\n  Codice di accesso: {codice}\n  Packet Tracer: {pt.status}"
+    print(f"\n  Penguin Inc. → http://127.0.0.1:{PORT}\n  Codice di accesso: {codice}\n  Rete: {motore.status}"
           f"\n  Client: {FRONTEND}\n  Pacchetto di gioco: {GIOCO.cartella} ({len(G().missioni)} missioni, "
           f"{len(G().livelli)} livelli)\n",
           flush=True)
     if COLLAUDO:
-        print("  🐞 MODALITÀ COLLAUDO ATTIVA (PTA_COLLAUDO=1): cheat per il debug accesi. Non usarla in demo.\n",
+        print("  🐞 MODALITÀ COLLAUDO ATTIVA (PNA_COLLAUDO=1): cheat per il debug accesi. Non usarla in demo.\n",
               flush=True)
     yield
-    await pt.stop()
+    await motore.stop()
 
 
 # Ogni endpoint è registrato qui e documentato in docs/API.md. Il wrapper dice che tipo di endpoint è:
-# action() modifica Packet Tracer, job_action() avvia un lavoro lungo, game_action() tocca solo la partita.
+# action() modifica la rete, job_action() avvia un lavoro lungo, game_action() tocca solo la partita.
 routes = [
     # pagina e file statici
     Route("/", index),
@@ -2950,7 +2589,7 @@ routes = [
     Route("/api/campaign/help", action(a_campaign_help), methods=["POST"]),
     Route("/api/campaign/reset", game_action(g_campaign_reset), methods=["POST"]),
 ]
-if COLLAUDO:  # senza PTA_COLLAUDO=1 l'endpoint non esiste proprio (404)
+if COLLAUDO:  # senza PNA_COLLAUDO=1 l'endpoint non esiste proprio (404)
     routes.append(Route("/api/collaudo/accademia", game_action(g_collaudo_accademia), methods=["POST"]))
 
 
@@ -2971,7 +2610,7 @@ async def solo_locale(request: Request, call_next):
     nel browser che si fa risolvere in 127.0.0.1 per comandare il gioco. Con un codice di accesso non serve.
     """
     if not LOGIN_REQUIRED and request_host(request) not in LOCAL_HOSTS:
-        return JSONResponse({"ok": False, "error": f"Senza codice di accesso PT Academy si usa solo da questo "
+        return JSONResponse({"ok": False, "error": f"Senza codice di accesso Penguin Inc. si usa solo da questo "
                                                    f"computer: apri http://127.0.0.1:{PORT}"}, status_code=403)
     return await call_next(request)
 
@@ -2981,4 +2620,13 @@ app = Starlette(routes=routes, lifespan=lifespan,
                             Middleware(BaseHTTPMiddleware, dispatch=no_stale_assets)])
 
 if __name__ == "__main__":
-    uvicorn.run(app, host=os.environ.get("PTA_HOST", "127.0.0.1"), port=PORT, log_level="warning")
+    # La porta si apre PRIMA di entrare nel user namespace: il socket resta nella rete del computer (o del
+    # container) e risponde da lì, mentre la rete del gioco vive nel namespace, isolata.
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    sock.bind((os.environ.get("PNA_HOST", "127.0.0.1"), PORT))
+    sock.listen(128)
+    if os.environ.get("PNA_RETE", "") != "simulata":
+        entra_nel_namespace()
+    config = uvicorn.Config(app, log_level="warning")
+    asyncio.run(uvicorn.Server(config).serve(sockets=[sock]))

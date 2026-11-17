@@ -5,8 +5,8 @@
 #   id         nome breve e unico (lettere minuscole, numeri, -). Non cambiarlo a partita iniziata:
 #              le missioni completate sono salvate per id.
 #   titolo, punti, storia
-#   rete       facoltativo: la topologia di partenza (una per giorno, nella prima challenge del giorno). «vuota» (il tavolo di Packet Tracer viene svuotato) oppure
-#              un file .pkt nella cartella reti/ (viene aperto in PT). Si prepara quando la missione comincia:
+#   rete       facoltativo: la topologia di partenza (una per giorno, nella prima challenge del giorno). «vuota» (il tavolo viene svuotato) oppure
+#              un file .yaml nella cartella reti/ (formato in backend/rete/topologia.py). Si prepara quando la missione comincia:
 #              alla fine della missione prima, oppure quando il giocatore si siede al computer per la prima
 #              volta; poi con «Ricomincia la challenge». Senza «rete» si continua dalla rete che c'è.
 #   tutorial   facoltativo, true: missione guidata (si vedono i passi, i loro «aiuto» e cosa manca). Senza:
@@ -37,7 +37,7 @@
 #                           e le altre verifiche dei livelli (bloccato, web, porta…: pronto-soccorso.yaml)
 #                ping:      nome di un piano di ping tollerante di missions.py (PIANI_PING)
 #                domanda:   {testo, scelte: […], giusta: N (da 1), spiegazione}: si completa rispondendo
-#                osserva:   {da, a, spiegazione}: il giocatore guarda il viaggio del ping nella simulazione
+#                osserva:   {da, a, spiegazione}: il giocatore guarda il viaggio del ping passo per passo
 #
 # Il server rilegge questo file da solo quando lo salvi. Se c'è un errore lo scrive nel suo registro
 # (e in /api/health) e continua con la versione precedente.
@@ -52,7 +52,7 @@ missioni:
     titolo: "1.1 · La prima LAN"
     punti: 100
     tutorial: true          # guidata: si vedono i passi, i loro aiuti e cosa manca
-    rete: vuota             # si parte dal tavolo vuoto: se in Packet Tracer c'è qualcosa, viene tolto
+    rete: vuota             # si parte dal tavolo vuoto: se sul tavolo c'è qualcosa, viene tolto
     storia: |-
       L'azienda ha comprato due computer e uno switch, ma una rete ancora non c'è. Costruisci una piccola rete in cui i due computer si parlano.
       È il tutorial: i passi qui sotto ti guidano uno alla volta.
@@ -95,11 +95,11 @@ missioni:
       - testo: I due PC si fanno un ping, in tutte e due le direzioni
         aiuto: >-
           Puoi provarlo tu dal «Prompt dei comandi» di un PC. Poi premi «Verifica»: il gioco fa partire i ping
-          veri in Packet Tracer.
+          veri sulla rete.
         verifica:
           - piano: lan
-      - testo: Osserva il viaggio del pacchetto nella simulazione
-        aiuto: "Premi «Guarda il viaggio del ping»: Packet Tracer segue il ping da un PC all'altro passo per passo."
+      - testo: Osserva il viaggio del pacchetto, passo per passo
+        aiuto: "Premi «Guarda il viaggio del ping»: il gioco segue il ping da un PC all'altro passo per passo."
         osserva:
           coppia: lan
           spiegazione: >-
@@ -141,7 +141,7 @@ missioni:
         spiegazione: Collega reti diverse e decide la strada che ogni pacchetto deve fare.
       - concetto: Interfaccia
         spiegazione: >-
-          Ogni porta del router sta in una rete diversa e ha il suo IP. Sui router Cisco le porte nascono
+          Ogni porta del router sta in una rete diversa e ha il suo IP. Sui router le porte nascono
           spente: vanno accese (no shutdown).
       - concetto: Gateway
         spiegazione: >-
@@ -213,13 +213,13 @@ missioni:
           - piano: reparti
 
   # ───────────────────────────── Giorno 2 ─────────────────────────────
-  # Ogni giorno parte da una sua topologia (il giorno 1 dal tavolo vuoto): la 2.1 apre giorno2.pkt (due reparti
+  # Ogni giorno parte da una sua topologia (il giorno 1 dal tavolo vuoto): la 2.1 apre giorno2.yaml (due reparti
   # già funzionanti dietro un router, con una porta libera), la 2.2 e la 2.3 continuano dalla rete che c'è.
 
   - id: g2-sala
     titolo: "2.1 · Una sala server"
     punti: 200
-    rete: giorno2.pkt
+    rete: giorno2.yaml
     storia: |-
       L'azienda apre una sala server in un'altra stanza. Collegala alla rete dei reparti attraverso un secondo router. Nella sala servono due server, con un indirizzo fisso, e un PC di prova che riceve il suo indirizzo in automatico.
       Obiettivo: i reparti e la sala server si raggiungono a vicenda.
@@ -367,11 +367,11 @@ missioni:
         verifica:
           - piano: firewall_blocco
 
-  # ── giorno 3: la rete di un cliente da proteggere (reti/giorno3.pkt): DMZ, VPN e cloud
+  # ── giorno 3: la rete di un cliente da proteggere (reti/giorno3.yaml): DMZ, VPN e cloud
   - id: g3-dmz
     titolo: "3.1 · Una DMZ per il sito"
     punti: 300
-    rete: giorno3.pkt
+    rete: giorno3.yaml
     storia: |-
       Un cliente ha già una rete funzionante: il router R1 collega Internet, il server web del sito (WEB) e, attraverso R2, la rete interna con i PC dei dipendenti e il server INTRANET. Ma è tutto aperto: da Internet si arriva ovunque. Metti i firewall e crea una DMZ per il server web.
       Obiettivo: il sito (porta 80 di WEB) si apre da Internet e dalla rete interna, e i dipendenti continuano a uscire su Internet; da Internet non si entra nella rete interna, e nemmeno dal server web, se un giorno qualcuno lo violasse.
@@ -437,7 +437,7 @@ missioni:
       - concetto: VPN
         spiegazione: >-
           «Rete privata virtuale»: un tunnel cifrato attraverso Internet che porta il computer di casa dentro la
-          rete dell'azienda, come se fosse in ufficio. In Packet Tracer il tunnel non c'è: rappresentiamo dove
+          rete dell'azienda, come se fosse in ufficio. Nel gioco il tunnel non c'è: rappresentiamo dove
           arrivano i dipendenti, cioè la loro sottorete.
       - concetto: Sottorete VPN
         spiegazione: >-
@@ -504,11 +504,11 @@ missioni:
         verifica:
           - piano: cloud_isolato
 
-  # ── giorno 4: attacchi in corso (reti/giorno4.pkt). Il traffico sospetto lo genera «traffico» (per lo sniffer).
+  # ── giorno 4: attacchi in corso (reti/giorno4.yaml). Il traffico sospetto lo genera «traffico» (per lo sniffer).
   - id: g4-forza-bruta
     titolo: "4.1 · Tentativi a raffica"
     punti: 350
-    rete: giorno4.pkt
+    rete: giorno4.yaml
     traffico:
       - {da: PC3, comando: "telnet @FILE 21"}
       - {da: PC1, comando: "web http://@WEB"}
@@ -598,10 +598,10 @@ missioni:
         spiegazione: >-
           Bloccare un'intera sottorete ferma l'attacco ma anche chi lavora: per l'utente il risultato è lo stesso
           del DDoS, il sito non si apre.
-      - concetto: In Packet Tracer
+      - concetto: Nel gioco
         spiegazione: >-
-          Il limite si configura davvero sul router (traffic shaping), ma Packet Tracer non ne simula l'effetto
-          sulla velocità: qui si impara dove e come metterlo.
+          Il limite si configura sul router (traffic shaping) e funziona davvero: il router rallenta il traffico
+          che esce da quella porta. Qui si impara dove e come metterlo.
     passi:
       - testo: Ascolta il traffico vicino al server web e rispondi alla domanda
         domanda:
@@ -697,12 +697,12 @@ messaggi:
   passo_mancante: "Passo {numero} non ancora fatto: {passo}. {motivo}"
   passo_mancante_diario: "«{titolo}»: manca il passo {numero}"
   niente_da_pingare: "Non trovo due dispositivi pronti per il ping del passo {numero}."
-  ping_in_corso: "Ping vero in Packet Tracer: {etichetta} ({ip})"
+  ping_in_corso: "Ping vero: {etichetta} ({ip})"
   ping_fallito: "Il ping {etichetta} ({ip}) non ha avuto risposta."
   ping_fallito_consiglio: "Controlla cavi, IP, maschere e gateway."
   ping_fallito_diario: "«{titolo}»: ping fallito"
   completata: "Missione «{titolo}» completata!"
   completata_diario: "🏆 Missione «{titolo}» completata!"
-  svuoto_tavolo: "Svuoto il tavolo di Packet Tracer"
+  svuoto_tavolo: "Svuoto il tavolo"
   ricominciata: "Tavolo pulito: si parte dalla missione 1."
   ricominciata_diario: "Accademia ricominciata da zero: tavolo vuoto"

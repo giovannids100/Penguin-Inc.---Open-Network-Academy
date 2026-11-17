@@ -1,0 +1,39 @@
+# Pronto Soccorso, livello 1 (Primo giorno): la rete di partenza, prima dei guasti.
+
+dispositivi:
+  - nome: R1
+    tipo: router
+    pos: [725, 118]
+    config: |
+      interface GigabitEthernet0/0
+       ip address 192.168.0.1 255.255.255.0
+       no shutdown
+      ip dhcp excluded-address 192.168.0.1 192.168.0.1
+      ip dhcp excluded-address 192.168.0.4
+      ip dhcp pool LAN_R1_0
+       network 192.168.0.0 255.255.255.0
+       default-router 192.168.0.1
+       dns-server 8.8.8.8
+  - nome: SW1
+    tipo: switch
+    pos: [725, 262]
+  - nome: PC1
+    tipo: pc
+    pos: [611, 418]
+    ip: dhcp
+  - nome: PC2
+    tipo: pc
+    pos: [725, 418]
+    ip: dhcp
+  - nome: SRV1
+    tipo: server
+    pos: [839, 418]
+    ip: 192.168.0.4/24
+    gateway: 192.168.0.1
+    servizi: [http, https, ftp, smtp]
+
+cavi:
+  - [R1, GigabitEthernet0/0, SW1, GigabitEthernet0/1]
+  - [SW1, FastEthernet0/1, PC1, FastEthernet0]
+  - [SW1, FastEthernet0/2, PC2, FastEthernet0]
+  - [SW1, FastEthernet0/3, SRV1, FastEthernet0]

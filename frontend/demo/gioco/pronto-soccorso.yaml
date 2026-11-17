@@ -2,13 +2,11 @@
 #
 # Per ogni livello:
 #   numero, titolo
-#   rete      la rete di partenza: argomenti dello strumento pt_full_build di packet-tracer-mcp
+#   rete      la rete di partenza: un file .yaml della cartella reti/ (formato in backend/rete/topologia.py)
 #   costruisci  facoltativo: azioni che costruiscono la rete (al posto di «rete») o la completano:
 #             aggiungi, collega, ip_host, ip_porta, comandi, zona_firewall {dispositivo, verso, zona, livello, ip,
 #             maschera}, regole_firewall {dispositivo, regole: [{da, verso, azione, protocollo, porta,
 #             destinazione}]} (vedi campagna.yaml per il formato delle azioni)
-#             (routers, pcs_per_lan, servers, template, routing, vlans…). Nomi e indirizzi della rete che
-#             ne esce si vedono con pt_full_build(..., deploy=False), senza toccare Packet Tracer.
 #   ticket    i sintomi raccontati dagli utenti: è tutto quello che il giocatore sa all'inizio
 #   guasti    vedi sotto
 #   verifiche_finali   controllo di tutta la rete quando i guasti sono riparati
@@ -21,7 +19,7 @@
 #   cosa_era_rotto   mostrato quando il guasto è riparato (o il giocatore si arrende)
 #   sintomo          mostrato finché il guasto è aperto, come lo direbbe un utente
 #   rompi            come si rompe la rete (vuoto = la falla c'è già nella rete di partenza):
-#                      comandi:      {dispositivo, righe: [righe IOS]}
+#                      comandi:      {dispositivo, righe: [righe della console]}
 #                      spegni_porta: {dispositivo, porta}
 #                      ip_host:      {dispositivo, ip, maschera, gateway}   ("@PC2" = l'IP attuale di PC2)
 #   verifiche        tutte devono passare a guasto riparato; almeno una deve fallire subito dopo la rottura.
@@ -43,14 +41,14 @@
 #   soluzione        mostrata quando il guasto è riparato o il giocatore si arrende
 #
 # Il server rilegge questo file da solo quando lo salvi. Un livello nuovo o cambiato si collauda avviandolo
-# con il server lanciato con PTA_COLLAUDO=1: così rifiuta il livello se la rete di partenza non funziona o se
-# un guasto non si vede. In gioco (senza PTA_COLLAUDO) questi controlli si saltano per non perdere tempo.
+# con il server lanciato con PNA_COLLAUDO=1: così rifiuta il livello se la rete di partenza non funziona o se
+# un guasto non si vede. In gioco (senza PNA_COLLAUDO) questi controlli si saltano per non perdere tempo.
 
 livelli:
 
   - numero: 1
     titolo: Primo giorno
-    rete: {routers: 1, pcs_per_lan: 2, servers: 1, template: "single_lan", routing: "static"}
+    rete: livello1.yaml
     ticket: |-
       Da: Giulia (PC2)
       «Da stamattina non mi funziona niente, nemmeno la rete interna.»
@@ -93,7 +91,7 @@ livelli:
 
   - numero: 2
     titolo: Due sedi
-    rete: {routers: 2, pcs_per_lan: 1, template: "multi_lan", routing: "ospf"}
+    rete: livello2.yaml
     ticket: |-
       Da: sede centrale (PC1)
       «Non riusciamo più a raggiungere la filiale. Dal router R1 la rete 192.168.1.0 della filiale sembra sparita.»
@@ -147,7 +145,7 @@ livelli:
 
   - numero: 3
     titolo: Reparti separati
-    rete: {routers: 1, pcs_per_lan: 4, template: "router_on_a_stick", vlans: 2}
+    rete: livello3.yaml
     ticket: |-
       Da: Amministrazione della Banca dei Ghiacci (VLAN 10)
       «Abbiamo spostato la scrivania di PC3 e da allora non va più in rete. PC1, sulla stessa VLAN, funziona.»
@@ -208,7 +206,7 @@ livelli:
 
   - numero: 4
     titolo: Il gestionale dei conti
-    rete: {routers: 2, pcs_per_lan: 1, servers: 1, template: "multi_lan", routing: "ospf"}
+    rete: livello4.yaml
     ticket: |-
       Da: responsabile sicurezza della Banca dei Ghiacci
       «Un cliente dalla sala d'attesa (PC2) è riuscito ad aprire il gestionale dei conti (http://192.168.0.3) e a sbirciare i saldi. Dalla sala il gestionale non deve essere raggiungibile; gli uffici (PC1) invece devono continuare a usarlo, e dalla sala si deve poter ancora contattare gli uffici.»
@@ -264,7 +262,7 @@ livelli:
 
   - numero: 5
     titolo: Le foche alla porta
-    rete: {routers: 2, pcs_per_lan: 2, servers: 1, template: "multi_lan", routing: "ospf"}
+    rete: livello5.yaml
     ticket: |-
       Da: Nevio, il capo
       «War room, subito! Il sito di Aringhe Fresche S.p.A. (http://192.168.0.4, sul server SRV1) è sommerso di richieste: lo stanno attaccando da fuori. Il monitoraggio dice che il diluvio arriva tutto da un portatile nella rete esterna, PC3. I clienti veri, come PC4, e i dipendenti in ufficio, come PC1, devono continuare ad aprire il sito.»
@@ -316,7 +314,7 @@ livelli:
 
   - numero: 6
     titolo: Pesca a strascico
-    rete: {routers: 2, pcs_per_lan: 2, servers: 1, template: "multi_lan", routing: "ospf"}
+    rete: livello6.yaml
     ticket: |-
       Da: Nevio, il capo
       «Nuovo allarme da Aringhe Fresche S.p.A.: da stamattina tutti ricevono email strane che chiedono la password. Partono dal PC di un dipendente della filiale, PC3: è compromesso. Va isolato dal server di posta SRV1 (192.168.0.4) subito, ma il suo vicino di scrivania, PC4, deve continuare a usare la posta e a lavorare con la sede (PC1).»
@@ -376,7 +374,7 @@ livelli:
 
   - numero: 7
     titolo: Antartide sotto assedio
-    rete: {routers: 2, pcs_per_lan: 2, servers: 1, template: "multi_lan", routing: "ospf"}
+    rete: livello7.yaml
     ticket: |-
       Da: Nevio, il capo
       «È il giorno peggiore: l'intera rete del Governo dell'Antartide è sotto attacco. Dalla rete esterna 192.168.1.0/24, ormai tutta in mano alle foche (PC3 e PC4), non deve più arrivare niente al server SRV1. Dentro, PC1 e PC2 devono continuare a usare il sito (http://192.168.0.4).»
@@ -431,7 +429,7 @@ livelli:
           - audit_pulito: {dispositivo: "R1", falle: [NO_SERVICE_PASSWORD_ENCRYPTION]}
         indizi:
           - "Krill ne ha parlato: chi legge la configurazione di R1 legge anche le password."
-          - Esiste un servizio di IOS che nasconde tutte le password scritte nella configurazione.
+          - Esiste un servizio del router che nasconde tutte le password scritte nella configurazione.
           - "R1 → 🛡️ Sicurezza → spunta «Cifra le password» e premi Proteggi (dalla console: «service password-encryption»)."
         soluzione: "R1 → service password-encryption."
       - id: gateway-dirottato
@@ -463,7 +461,7 @@ livelli:
 
   - numero: 8
     titolo: Il canale nascosto
-    rete: {routers: 2, pcs_per_lan: 2, servers: 1, template: "multi_lan", routing: "ospf"}
+    rete: livello8.yaml
     # Il «rumore di fondo» della rete, che lo sniffer vede: due clienti che usano il sito e la reverse shell
     # (PC2, infetto, che chiama il server delle foche PC3 sulla porta 4444 e riprova di continuo).
     traffico:
@@ -511,7 +509,7 @@ livelli:
 
   - numero: 9
     titolo: La vetrina
-    # Rete costruita a passi (pt_full_build non conosce il firewall): un ASA con tre zone. La rete interna
+    # Rete costruita a passi, con le azioni: un firewall con tre zone. La rete interna
     # (PC1), la DMZ con il server del sito (SRV1) e Internet (PC2, un cliente qualsiasi).
     costruisci:
       - aggiungi: {tipo: firewall, nome: FW1, x: 520, y: 260}
@@ -594,7 +592,7 @@ livelli:
 # Messaggi che il gioco scrive mentre prepara e verifica i livelli (avvisi, passi in corso, diario).
 # I segnaposto tra graffe ({titolo}, {punti}…) vengono sostituiti dal gioco: lasciali com'è.
 messaggi:
-  svuoto_tavolo: "Svuoto il tavolo di Packet Tracer"
+  svuoto_tavolo: "Svuoto il tavolo"
   costruisco: "Costruisco la rete del livello {numero}: «{titolo}»"
   controllo_partenza: "Controllo che la rete di partenza funzioni"
   rompo: "Qualcuno ci mette le mani… 😈"
@@ -602,7 +600,7 @@ messaggi:
   pronto: "Livello {numero} pronto: leggi il ticket!"
   pronto_diario: "🚑 Livello {numero} «{titolo}»: nuovo ticket in arrivo"
   istruzioni: "Leggi il ticket e trova i guasti. Quando pensi di aver riparato qualcosa premi «Verifica»."
-  avanzo_tempo: "Faccio avanzare il tempo di Packet Tracer (STP, ARP)"
+  avanzo_tempo: "Preparo la rete (ARP, DHCP)"
   troppo_bloccato: "hai bloccato anche traffico che deve passare ({motivo})"
   scorciatoia: "il sintomo è sparito ma la riparazione non rispetta il ticket: {motivo}"
   guasto_riparato_diario: "🔧 Guasto riparato: {titolo}"

@@ -1,7 +1,7 @@
 """Pacchetto di gioco: i contenuti e le impostazioni del gioco, scritti in YAML fuori dal codice.
 
 Il backend è generico (tavolo, configurazione, sicurezza, motore di missioni e livelli); quello che rende
-PT Academy un gioco preciso sta in una cartella di file YAML, il «pacchetto di gioco»:
+Penguin Inc. un gioco preciso sta in una cartella di file YAML, il «pacchetto di gioco»:
 
     impostazioni.yaml     punteggi, dispositivi che si possono aggiungere, tempi e comandi suggeriti
     interfaccia.yaml      i testi dell'interfaccia web (li usa solo il frontend)
@@ -11,7 +11,7 @@ PT Academy un gioco preciso sta in una cartella di file YAML, il «pacchetto di 
     storia.yaml           la storyline di Penguin Inc (giornate, dialoghi, buoni caffè): la usa solo il
                           frontend, che la riceve dentro i testi dell'interfaccia (/api/ui → testi.storia)
 
-La cartella è PTA_GIOCO, altrimenti ../frontend/demo/gioco. Ogni file è facoltativo: senza, valgono i
+La cartella è PNA_GIOCO, altrimenti ../frontend/demo/gioco. Ogni file è facoltativo: senza, valgono i
 valori predefiniti qui sotto (nessuna missione, nessun livello), così il backend funziona anche per un
 altro gioco che usa solo l'API.
 
@@ -35,11 +35,11 @@ import missions as M
 import rescue as R
 
 HERE = Path(__file__).parent
-CARTELLA = Path(os.environ.get("PTA_GIOCO") or HERE.parent / "frontend" / "demo" / "gioco")
+CARTELLA = Path(os.environ.get("PNA_GIOCO") or HERE.parent / "frontend" / "demo" / "gioco")
 FILE = ("impostazioni.yaml", "interfaccia.yaml", "accademia.yaml", "pronto-soccorso.yaml", "campagna.yaml",
         "storia.yaml")
 
-# I tipi di dispositivo che il backend sa gestire. «cloud» è un Server-PT presentato come servizio cloud.
+# I tipi di dispositivo che il backend sa gestire. «cloud» è un server presentato come servizio cloud.
 KINDS = ("router", "switch", "firewall", "pc", "server", "cloud")
 GRAVITA = {"alta": "high", "media": "medium", "bassa": "low"}
 
@@ -47,12 +47,12 @@ GRAVITA = {"alta": "high", "media": "medium", "bassa": "low"}
 IMPOSTAZIONI_PREDEFINITE = {
     "punteggio": {"guasto_riparato": 100, "costo_indizio": 25, "bonus_senza_indizi": 50},
     "dispositivi": {
-        "router": {"modello": "2911", "prefisso": "R", "nome": "Router", "icona": "🧭", "articolo": "un router"},
-        "switch": {"modello": "2960-24TT", "prefisso": "SW", "nome": "Switch", "icona": "🔀", "articolo": "uno switch"},
-        "pc": {"modello": "PC-PT", "prefisso": "PC", "nome": "PC", "icona": "🖥️", "articolo": "un PC"},
-        "server": {"modello": "Server-PT", "prefisso": "SRV", "nome": "Server", "icona": "🗄️", "articolo": "un server"},
-        "firewall": {"modello": "5506-X", "prefisso": "FW", "nome": "Firewall", "icona": "🧱", "articolo": "un firewall"},
-        "cloud": {"modello": "Server-PT", "prefisso": "CLOUD", "nome": "Cloud", "icona": "☁️",
+        "router": {"prefisso": "R", "nome": "Router", "icona": "🧭", "articolo": "un router"},
+        "switch": {"prefisso": "SW", "nome": "Switch", "icona": "🔀", "articolo": "uno switch"},
+        "pc": {"prefisso": "PC", "nome": "PC", "icona": "🖥️", "articolo": "un PC"},
+        "server": {"prefisso": "SRV", "nome": "Server", "icona": "🗄️", "articolo": "un server"},
+        "firewall": {"prefisso": "FW", "nome": "Firewall", "icona": "🧱", "articolo": "un firewall"},
+        "cloud": {"prefisso": "CLOUD", "nome": "Cloud", "icona": "☁️",
                   "articolo": "un servizio cloud"},
     },
     "interfaccia": {
@@ -72,16 +72,16 @@ MESSAGGI_ACCADEMIA = {
     "passo_mancante": "Passo {numero} non ancora fatto: {passo}. {motivo}",
     "passo_mancante_diario": "«{titolo}»: manca il passo {numero}",
     "niente_da_pingare": "Non trovo due dispositivi pronti per il ping del passo {numero}.",
-    "ping_in_corso": "Ping vero in Packet Tracer: {etichetta} ({ip})",
+    "ping_in_corso": "Ping vero: {etichetta} ({ip})",
     "ping_fallito": "Il ping {etichetta} ({ip}) non ha avuto risposta.",
     "ping_fallito_consiglio": "Controlla cavi, IP, maschere e gateway.",
     "ping_fallito_diario": "«{titolo}»: ping fallito",
     "completata": "Missione «{titolo}» completata! +{punti} punti",
     "completata_diario": "🏆 Missione «{titolo}» completata!",
-    "svuoto_tavolo": "Svuoto il tavolo di Packet Tracer",
+    "svuoto_tavolo": "Svuoto il tavolo",
     "ricominciata": "Tavolo pulito: si parte dalla missione 1.",
     "ricominciata_diario": "Accademia ricominciata da zero: tavolo vuoto",
-    "carico_rete": "Carico in Packet Tracer la rete di partenza di «{titolo}»",
+    "carico_rete": "Carico la rete di partenza di «{titolo}»",
     "rete_pronta": "La rete di «{titolo}» è pronta sul tavolo.",
     "rete_ricaricata": "Si riparte: il tavolo è tornato com'era all'inizio di «{titolo}».",
     "rete_ricaricata_diario": "↺ «{titolo}»: rete di partenza ricaricata",
@@ -99,7 +99,7 @@ MESSAGGI_ACCADEMIA = {
     "verifico_condizione": "Verifico: {passo}",
 }
 MESSAGGI_SOCCORSO = {
-    "svuoto_tavolo": "Svuoto il tavolo di Packet Tracer",
+    "svuoto_tavolo": "Svuoto il tavolo",
     "costruisco": "Costruisco la rete del livello {numero}: «{titolo}»",
     "controllo_partenza": "Controllo che la rete di partenza funzioni",
     "rompo": "Qualcuno ci mette le mani… 😈",
@@ -107,7 +107,7 @@ MESSAGGI_SOCCORSO = {
     "pronto": "Livello {numero} pronto: leggi il ticket!",
     "pronto_diario": "🚑 Livello {numero} «{titolo}»: nuovo ticket in arrivo",
     "istruzioni": "Leggi il ticket e trova i guasti. Quando pensi di aver riparato qualcosa premi «Verifica».",
-    "avanzo_tempo": "Faccio avanzare il tempo di Packet Tracer (STP, ARP)",
+    "avanzo_tempo": "Preparo la rete (ARP, DHCP)",
     "troppo_bloccato": "hai bloccato anche traffico che deve passare ({motivo})",
     "scorciatoia": "il sintomo è sparito ma la riparazione non rispetta il ticket: {motivo}",
     "guasto_riparato_diario": "🔧 Guasto riparato: {titolo}",
@@ -268,6 +268,15 @@ def _impostazioni(dati: dict, dove: str) -> dict:
     return imp
 
 
+def _file_rete(rete: str, dove: str, cartella: Path) -> str:
+    """Il nome di una topologia di partenza: un file .yaml della cartella reti/ (formato in backend/rete/topologia.py)."""
+    if not re.fullmatch(r"[\w.-]+\.yaml", rete):
+        raise ErroreContenuti(f"{dove}: il nome di un file .yaml nella cartella «reti» (es. giorno2.yaml)")
+    if not (cartella / "reti" / rete).exists():
+        raise ErroreContenuti(f"{dove}: il file reti/{rete} non esiste")
+    return rete
+
+
 def _missioni(dati: dict, dove: str, cartella: Path) -> list:
     out, visti = [], set()
     for i, m in enumerate(_lista(dati.get("missioni"), f"{dove}, missioni"), 1):
@@ -289,11 +298,7 @@ def _missioni(dati: dict, dove: str, cartella: Path) -> list:
             raise ErroreContenuti(f"{w}: servono dei passi")
         rete = _testo(m.get("rete"), f"{w}, rete", vuoto_ok=True)
         if rete and rete != "vuota":
-            if not re.fullmatch(r"[\w.-]+\.pkt", rete):
-                raise ErroreContenuti(f"{w}, rete: «vuota» oppure il nome di un file .pkt nella cartella «reti» "
-                                      f"(es. giorno1-esterno.pkt)")
-            if not (cartella / "reti" / rete).exists():
-                raise ErroreContenuti(f"{w}, rete: il file reti/{rete} non esiste")
+            _file_rete(rete, f"{w}, rete", cartella)
         tutorial = m.get("tutorial", False)
         if not isinstance(tutorial, bool):
             raise ErroreContenuti(f"{w}, tutorial: true (missione guidata) o false")
@@ -498,7 +503,7 @@ def _rompi(v, dove: str) -> tuple:
     if tipo == "comandi":
         righe = [_testo(r, f"{w}, righe") for r in _lista(c.get("righe"), f"{w}, righe")]
         if not righe:
-            raise ErroreContenuti(f"{w}: servono delle righe IOS")
+            raise ErroreContenuti(f"{w}: servono delle righe della console")
         return ("cli", _testo(c.get("dispositivo"), f"{w}, dispositivo"), righe)
     if tipo == "spegni_porta":
         return R.shut(_testo(c.get("dispositivo"), f"{w}, dispositivo"), _testo(c.get("porta"), f"{w}, porta"))
@@ -575,7 +580,7 @@ def _vincolo(v, dove: str):
     return R.host_in(_testo(c.get("dispositivo"), f"{w}, dispositivo"), rete, _testo(c.get("messaggio"), f"{w}, messaggio"))
 
 
-def _livelli(dati: dict, dove: str) -> list:
+def _livelli(dati: dict, dove: str, cartella: Path) -> list:
     out, numeri = [], set()
     for i, lv in enumerate(_lista(dati.get("livelli"), f"{dove}, livelli"), 1):
         lv = _mappa(lv, f"{dove}, livello {i}")
@@ -603,10 +608,10 @@ def _livelli(dati: dict, dove: str) -> list:
                 checks=verifiche))
         if not guasti:
             raise ErroreContenuti(f"{w}: servono dei guasti")
-        rete = _mappa(lv.get("rete"), f"{w}, rete")
+        rete = _file_rete(_testo(lv["rete"], f"{w}, rete"), f"{w}, rete", cartella) if lv.get("rete") else ""
         costruisci = [_azione(x, f"{w}, costruisci {j}") for j, x in enumerate(_lista(lv.get("costruisci"), f"{w}, costruisci"), 1)]
         if not rete and not costruisci:
-            raise ErroreContenuti(f"{w}: serve «rete» (gli argomenti di pt_full_build) oppure «costruisci» (azioni)")
+            raise ErroreContenuti(f"{w}: serve «rete» (una topologia di reti/) oppure «costruisci» (azioni)")
         traffico = _traffico(lv.get("traffico"), w)
         out.append(R.Level(n, _testo(lv.get("titolo"), f"{w}, titolo"), rete, _testo(lv.get("ticket"), f"{w}, ticket"),
                            guasti, lesson=_testo(lv.get("lezione"), f"{w}, lezione", vuoto_ok=True), traffic=traffico,
@@ -710,7 +715,7 @@ def carica(cartella: Path = CARTELLA) -> Pacchetto:
                                   f"Controlla rientri, due punti e virgolette.")
         dati[nome] = _mappa(d, nome)
     acc, soc, cam = dati["accademia.yaml"], dati["pronto-soccorso.yaml"], dati["campagna.yaml"]
-    missioni, livelli = _missioni(acc, "accademia.yaml", cartella), _livelli(soc, "pronto-soccorso.yaml")
+    missioni, livelli = _missioni(acc, "accademia.yaml", cartella), _livelli(soc, "pronto-soccorso.yaml", cartella)
     return Pacchetto(
         impostazioni=_impostazioni(dati["impostazioni.yaml"], "impostazioni.yaml"),
         interfaccia={**dati["interfaccia.yaml"], "storia": dati["storia.yaml"]},

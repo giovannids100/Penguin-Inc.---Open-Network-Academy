@@ -3,28 +3,23 @@
 </p>
 
 <p align="center">
-  <b>Un serious game sulle reti e la cybersicurezza, dove si gioca su una rete vera di Cisco Packet Tracer.</b><br>
-  Progetto in gara a <b>The Big Hack 2026</b> · challenge <b>C4 Consorzio Clara</b> (Cisco Networking Academy)
+  <b>Penguin Inc. — Open Network Academy</b><br>
+  Un serious game sulle reti e la cybersicurezza, dove si gioca su una rete vera costruita con
+  <a href="https://mininet.org/">Mininet</a>.<br>
+  Nato a <b>The Big Hack 2026</b> · challenge <b>C4 Consorzio Clara</b>
 </p>
-
-<!-- Video di presentazione. GitHub mostra il player solo per i video caricati come allegato (user-attachments),
-     e solo se il link è da solo su una riga, fuori dall'HTML. Lo stesso video è anche in docs/video/. -->
-
-https://github.com/user-attachments/assets/12c95ea3-2608-4565-a71f-4abe95f7fce6
-
 
 ---
 
 ## The Big Hack 2026
 
-**Penguin Inc** (nel codice *PT Academy*) è il progetto del team **Los Penguinos** per
+**Penguin Inc.** è il progetto del team **Los Penguinos** per
 [The Big Hack 2026](https://go.codemotion.com/big-hack-hackathon-2026/), l'hackathon di **Codemotion × Futuro
 Remoto** alla **Città della Scienza di Napoli**, il 14 e 15 novembre 2026.
 
-La challenge **C4 · Consorzio Clara** (Cisco Networking Academy) chiedeva un **serious game educativo sul networking
-e la cybersicurezza** per chi è alle prime armi. La nostra risposta è un gioco in cui ogni rete è vera: quello che il
-giocatore costruisce nel browser viene creato in Cisco Packet Tracer, e il gioco lo verifica con ping, tracce e
-connessioni reali.
+La challenge **C4 · Consorzio Clara** chiedeva un **serious game educativo sul networking e la cybersicurezza** per
+chi è alle prime armi. La nostra risposta è un gioco in cui ogni rete è vera: quello che il giocatore costruisce
+nel browser diventa una rete di macchine Linux, e il gioco la verifica con ping, tracce e connessioni reali.
 
 ## La storia
 
@@ -38,12 +33,12 @@ un caffè della macchinetta, comprato con i buoni guadagnati.
   <img src="docs/img/ufficio.png" alt="L'ufficio di Penguin Inc: Jody presenta il lavoro del giorno" width="49%">
 </p>
 
-Il lavoro si fa al **computer**, cioè un'interfaccia collegata a Packet Tracer. Lì si aggiungono dispositivi e cavi,
+Il lavoro si fa al **computer**, cioè un'interfaccia collegata alla rete vera. Lì si aggiungono dispositivi e cavi,
 si configurano indirizzi, rotte, DHCP, DNS, firewall, ACL e limiti di velocità, si fanno ping e si ascolta il
 traffico con uno sniffer. Il pulsante **Verifica** prova il traffico vero sulla rete.
 
 <p align="center">
-  <img src="docs/img/monitor.png" alt="Il computer: la challenge a sinistra, la rete vera di Packet Tracer al centro" width="90%">
+  <img src="docs/img/monitor.png" alt="Il computer: la challenge a sinistra, la rete al centro" width="90%">
 </p>
 
 | Giorno | Tema | Le tre challenge |
@@ -67,70 +62,81 @@ fermi senza bloccare chi lavora. Alla fine arriva la **promozione**.
 
 ## Perché è utile
 
-- **Niente simulazioni finte.** Le topologie sono vere reti di Packet Tracer, lo strumento che si usa nei corsi
-  Cisco Networking Academy. Quello che si impara vale fuori dal gioco.
+- **Niente simulazioni finte.** Ogni dispositivo è una piccola macchina Linux con la sua rete (un namespace
+  creato da Mininet): i ping sono ping veri, il firewall è `nftables`, il DHCP è `dnsmasq`, lo sniffer è
+  `tcpdump`. Quello che si impara vale fuori dal gioco.
 - **Si impara facendo.** Ogni challenge dice *cosa* ottenere, non *come*: la soluzione la trova il giocatore, con il
   Manuale (la teoria in pillole) e i consigli di Jody, dal più vago al più preciso.
 - **Le verifiche controllano il risultato, non la ricetta.** Il gioco riconosce la forma della rete e prova il
   traffico: vale qualsiasi soluzione corretta, con i nomi e gli indirizzi scelti dal giocatore.
 - **Dalle basi alla difesa.** Si parte da due PC e uno switch e si arriva a DMZ, VPN, rate limiting e risposta agli
   incidenti.
-- **I contenuti si cambiano senza programmare.** Storia, challenge, testi e livelli sono file YAML in
+- **La console dei router** usa la sintassi da riga di comando più diffusa nel settore (`interface`, `ip address`,
+  `ip route`, `access-list`, `router ospf`…), la stessa di FRR e di molti apparati reali.
+- **I contenuti si cambiano senza programmare.** Storia, challenge, testi e reti di partenza sono file YAML in
   `frontend/demo/gioco/`.
+- **Tutto open source**, e gira su un computer qualsiasi con Docker.
 
 ## Come funziona
 
 ```
-Browser ──HTTP──▶ server.py ──MCP stdio──▶ packet-tracer-mcp ──bridge :54321──▶ Packet Tracer
+Browser ──HTTP──▶ server.py ──▶ motore di rete ──▶ modello della rete ──▶ Mininet (namespace Linux)
+                                     │                                        veth, bridge, nftables,
+                                     └──▶ console dei router                  tc, dnsmasq, tcpdump
 ```
 
 - **Client** (`frontend/demo/`): l'ufficio in pixel art (`scripts/storia.js`) e il computer collegato alla rete
   (`scripts/app.js`), in HTML, CSS e JavaScript, senza framework.
 - **Server** (`backend/server.py`, Python e Starlette): azioni sulla rete, lavori lunghi con avanzamento, verifiche
   e salvataggio della partita.
-- **Collegamento a Packet Tracer** (`backend/ptlink.py`): una sessione MCP verso
-  [`packet-tracer-mcp`](https://pypi.org/project/packet-tracer-mcp/), che comanda Packet Tracer attraverso
-  l'estensione MCP BUILDER.
+- **Motore di rete** (`backend/rete/`): un **modello** della rete (dispositivi, cavi, configurazioni, tabelle di
+  routing statiche e OSPF, VLAN), la **console** dei router e degli switch, la **traccia** di un pacchetto passo per
+  passo (dice anche quale riga di quale ACL lo scarta) e il **kernel**, che realizza il modello con Mininet: un
+  namespace per dispositivo, coppie veth per i cavi, bridge Linux con le VLAN per gli switch, `nftables` per ACL e
+  firewall, `tc` per i limiti di velocità, `dnsmasq` per DHCP e DNS, piccoli servizi Python per web, FTP e posta.
 - **Motore di gioco** (`backend/missions.py`, `rescue.py`, `firewall.py`): controlli sulla forma della rete e
   verifiche sul traffico vero (ping, tracce, porte TCP, risoluzione dei nomi, limiti di velocità).
-- **Contenuti** (`frontend/demo/gioco/*.yaml`): la storia, le challenge e i testi; le reti di partenza sono file
-  `.pkt` in `gioco/reti/`.
+- **Contenuti** (`frontend/demo/gioco/*.yaml`): la storia, le challenge e i testi; le reti di partenza sono
+  topologie YAML in `gioco/reti/`.
+
+Senza Mininet (per esempio avviando il server su macOS fuori da Docker) il gioco parte da solo in **modalità
+simulata**: stesse regole, ma le prove si calcolano sul modello invece che con traffico vero.
 
 Il motore ha anche un secondo modo di giocare, il **Pronto Soccorso**, disponibile dall'API: il gioco costruisce
 una rete, la guasta di proposito e consegna un ticket con i sintomi da riparare.
 
 ## Avvio
 
-Serve **Cisco Packet Tracer** aperto con l'estensione **MCP BUILDER** (Extensions → MCP BUILDER) e
-[`uv`](https://docs.astral.sh/uv/).
+Serve [Docker](https://docs.docker.com/get-docker/) (Docker Desktop su macOS e Windows, Docker Engine su Linux).
 
 ```bash
-uv run --directory backend server.py
+docker compose up -d --build
 ```
 
 Poi apri http://127.0.0.1:8787. Su macOS basta un doppio clic su
-[`Avvia PT Academy.command`](Avvia%20PT%20Academy.command).
+[`Avvia Penguin Inc.command`](Avvia%20Penguin%20Inc.command) (su Linux: `bash "Avvia Penguin Inc.command"`).
+Per fermarlo: `docker compose down`.
 
-- **Senza codice di accesso** il gioco risponde solo a questo computer.
-- **Per giocare da altri dispositivi della rete locale** serve un codice:
-  `PTA_HOST=0.0.0.0 PTA_CODE=scegli-un-codice uv run --directory backend server.py`, poi si apre
-  `http://<IP di questo computer>:8787`. Usa un codice lungo: chi lo conosce comanda il tuo Packet Tracer (solo
-  dentro la simulazione).
-- **Modalità collaudo** (`PTA_COLLAUDO=1`): cheat per provare il gioco (salta una challenge, vai a un giorno,
-  buoni caffè). Non va usata in una demo pubblica.
-- La partita è salvata in `backend/data/state.json`, fuori da git: cancellalo a server fermo per ripartire da zero.
-- Le challenge che partono da una rete preparata la aprono in Packet Tracer al posto di quella aperta: salva prima
-  il tuo lavoro.
+- **Il container non ha privilegi**: gira come utente normale, senza capability e senza `privileged`. Il server crea
+  un suo *user namespace* e lì dentro costruisce la rete del gioco, isolata dal computer (dettagli in
+  [`docker-compose.yml`](docker-compose.yml) e in [ARCHITETTURA.md](backend/docs/ARCHITETTURA.md)).
+- **Il gioco risponde solo a questo computer** (porta aperta su `127.0.0.1`). Per giocare da altri dispositivi
+  servono un codice di accesso (`PNA_CODE`) e la porta aperta sulla rete locale nel `docker-compose.yml`.
+- **Modalità collaudo** (`PNA_COLLAUDO=1 docker compose up -d`): cheat per provare il gioco (salta una challenge,
+  vai a un giorno, buoni caffè) e controlli automatici all'avvio dei livelli. Non va usata in una demo pubblica.
+- La partita e la rete sono salvate nel volume Docker `partita`: `docker compose down -v` riparte da zero.
+- **Senza Docker**: `python3 backend/server.py` (servono `starlette`, `uvicorn` e `pyyaml`). Su Linux con Mininet
+  installato la rete è vera, altrimenti simulata; `PNA_RETE=simulata` la forza simulata.
 
-Copione della demo per la giuria e soluzione dei problemi più comuni: [DEMO.md](DEMO.md).
+Copione della demo e soluzione dei problemi più comuni: [DEMO.md](DEMO.md).
 
 ## Documentazione
 
 - [DEMO.md](DEMO.md): checklist, copione della demo, cosa fare se qualcosa va storto.
 - [frontend/demo/README.md](frontend/demo/README.md): il client, la storia di Penguin Inc e come cambiare i contenuti.
 - [backend/docs/API.md](backend/docs/API.md): l'API HTTP, endpoint per endpoint.
-- [backend/docs/ARCHITETTURA.md](backend/docs/ARCHITETTURA.md): come funziona dentro, come aggiungere challenge e
-  livelli, e le trappole di Packet Tracer che abbiamo incontrato e misurato.
+- [backend/docs/ARCHITETTURA.md](backend/docs/ARCHITETTURA.md): come funziona dentro, come aggiungere challenge,
+  livelli e reti di partenza.
 
 ## Team
 
@@ -141,7 +147,6 @@ Copione della demo per la giuria e soluzione dei problemi più comuni: [DEMO.md]
 
 Musica: «Stumble Around» e «Face the Facts» di Zane Little, dall'album
 [*A Bag of Chips [Vol. 1]*](https://zanelittle.bandcamp.com/album/a-bag-of-chips-vol-1) (2022), licenza
-[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/deed.it). Dettagli in [`CREDITI.md`](CREDITI.md).
-
-Cisco e Packet Tracer sono marchi di Cisco Systems, Inc. Questo progetto non è affiliato a Cisco: usa Packet Tracer
-come strumento, e le challenge sono scritte da noi.
+[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/deed.it). La rete del gioco usa
+[Mininet](https://mininet.org/) (licenza in [`deploy/MININET-LICENSE`](deploy/MININET-LICENSE)). Dettagli in
+[`CREDITI.md`](CREDITI.md).

@@ -5,13 +5,13 @@ Una campagna è una sequenza di giorni. Ogni giorno:
   - ha i dialoghi dei personaggi a inizio giornata («prima») e a fine giornata («dopo»);
   - a fine giornata dà una ricompensa in valuta di gioco (in Penguins Inc. i buoni caffè);
   - offre aiuti dei colleghi a pagamento: una risposta (testo) ed eventualmente azioni vere sulla rete
-    di Packet Tracer (il collega «mette le mani» sul tavolo al posto del giocatore).
+    vera (il collega «mette le mani» sul tavolo al posto del giocatore).
 
 Il giorno corrente è il primo non ancora completato; un giorno si completa quando tutte le sue attività
 sono fatte, anche se fatte prima (per esempio da chi aveva già giocato l'Accademia senza campagna).
 
 Questo file definisce solo i dati e le regole: niente testi (stanno in campagna.yaml del pacchetto di
-gioco, letto da contenuti.py) e niente chiamate a Packet Tracer (le esegue server.py).
+gioco, letto da contenuti.py) e niente chiamate alla rete (le esegue server.py).
 """
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-/* Il «monitor» di Penguin Inc: l'interfaccia che comanda Packet Tracer, vestita come il computer dell'ufficio.
+/* Il «monitor» di Penguin Inc: l'interfaccia che comanda la rete, vestita come il computer dell'ufficio.
  *
  * Solo aspetto: viene caricato dopo style.css e ne cambia colori, caratteri, bordi e cursori. Nessuna regola
  * qui cambia cosa fa il gioco. La grafica viene dagli asset di Penguin Inc (assets/penguin/ui): la cornice del
@@ -91,8 +91,8 @@ body:has(#job:not(.hidden)) .app, body:has(#job:not(.hidden)) .app * { cursor: u
   font-family: var(--mo-pixel); font-size: 11px; background: var(--mo-bordo); color: #f5c542;
   border-radius: 3px; padding: 7px 10px;
 }
-.pt-status { color: #b8cdf0; font-family: var(--mo-pixel); font-size: 9px; }
-.pt-status i { border-radius: 0; width: 9px; height: 9px; box-shadow: 0 0 0 2px var(--mo-bordo); }
+.net-status { color: #b8cdf0; font-family: var(--mo-pixel); font-size: 9px; }
+.net-status i { border-radius: 0; width: 9px; height: 9px; box-shadow: 0 0 0 2px var(--mo-bordo); }
 
 /* «Torna in ufficio» è la ✕ rossa della finestra */
 body.storia .btn-ufficio {
@@ -177,7 +177,7 @@ label { font-size: 13px; color: var(--muted); }
 .seg button { font-family: var(--mo-testo); font-weight: 600; color: var(--muted); }
 .seg button.on { background: var(--mo-titolo); color: #fff; }
 
-/* ───────────── il tavolo (la finestra di Packet Tracer) ───────────── */
+/* ───────────── il tavolo (la rete) ───────────── */
 .stage { overflow: hidden; }
 .toolbar { background: #e3edf8; border-bottom: 3px solid var(--mo-bordo); padding: 6px 8px; gap: 6px 12px; }
 .toolbar .lbl { font-family: var(--mo-pixel); font-size: 8px; color: var(--muted); }

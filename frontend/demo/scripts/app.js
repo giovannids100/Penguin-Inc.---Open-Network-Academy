@@ -1,5 +1,5 @@
 "use strict";
-/* PT Academy, client demo: mostra il tavolo vero di Packet Tracer e lo comanda attraverso l'API del server.
+/* Penguin Inc., client demo: mostra il tavolo (la rete vera, costruita con Mininet) e lo comanda attraverso l'API del server.
  *
  * I testi e le impostazioni non sono qui: arrivano da GET /api/ui, che li legge dal pacchetto di gioco
  * (frontend/demo/gioco/interfaccia.yaml e impostazioni.yaml). Un testo si usa con t("zona.chiave", {valori}).
@@ -12,7 +12,7 @@ const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "
 /* ───────────── testi e impostazioni dal pacchetto di gioco ───────────── */
 let TESTI = {};             // interfaccia.yaml
 let CFG = null;             // {dispositivi, interfaccia, punteggio} da impostazioni.yaml
-let COLLAUDO = false;       // server avviato con PTA_COLLAUDO=1: cheat per il debug (scripts/storia.js)
+let COLLAUDO = false;       // server avviato con PNA_COLLAUDO=1: cheat per il debug (scripts/storia.js)
 
 /* Il testo «zona.chiave» con i segnaposto {nome} sostituiti. Il testo del YAML può contenere HTML (lo scrive
  * il team); i valori NO: chi lo usa dentro innerHTML passa valori già ripuliti con esc(). Se la chiave manca
@@ -102,7 +102,7 @@ async function api(path, body) {
 }
 
 async function act(path, body, okMsg) {
-  // Se PT è occupato il server mette il comando in coda: lo diciamo, così l'attesa non sembra un blocco.
+  // Se la rete è occupata il server mette il comando in coda: lo diciamo, così l'attesa non sembra un blocco.
   if (S && (S.busy || (S.job && !S.job.done))) toast(tt("generale.in_coda"), "info", 4000);
   setBusy(true);
   const d = await api(path, body);
@@ -119,7 +119,7 @@ async function job(path, body) {
   if (d && d.job) { S.job = d.job; renderJob(); schedulePoll(400); }
 }
 
-function setBusy(b) { $("#ptStatus").classList.toggle("busy", b); }
+function setBusy(b) { $("#netStatus").classList.toggle("busy", b); }
 
 /* ───────────── avvio, login e aggiornamento ───────────── */
 async function caricaInterfaccia() {
@@ -188,9 +188,9 @@ function applyState(d) {
   S = d;
   if (sel && !dev(sel)) { sel = null; selPort = null; }
   mostraErroreContenuti(d.errore_contenuti);
-  const st = $("#ptStatus");
-  st.classList.toggle("ok", d.pt.ok);
-  st.title = tt("generale.stato_pt", { stato: d.pt.status });
+  const st = $("#netStatus");
+  st.classList.toggle("ok", d.rete.ok);
+  st.title = tt("generale.stato_rete", { stato: d.rete.status });
   $$(".tab").forEach((b) => b.classList.toggle("active", b.dataset.mode === d.mode));
   if (storiaAttiva()) Storia.aggiorna();
   renderGame();
@@ -198,7 +198,7 @@ function applyState(d) {
   renderInspector();
   renderLog();
   renderJob();
-  // la rete è cambiata tutta insieme (un file .pkt caricato, un livello, il tavolo svuotato): si ricentra la vista
+  // la rete è cambiata tutta insieme (una topologia caricata, un livello, il tavolo svuotato): si ricentra la vista
   const nomi = d.topology.devices.map((x) => x.name);
   const cambiati = nomi.filter((n) => !ultimiNomi.includes(n)).length + ultimiNomi.filter((n) => !nomi.includes(n)).length;
   if (firstLoad || (cambiati > 1 && !drag)) fit();
@@ -351,7 +351,7 @@ function academyCheck() { job("/api/academy/check", {}); }
 async function academyRestart() {
   const m = S.academy.current;
   if (m && await chiedi(tt("accademia.conferma_ricomincia_challenge", { titolo: m.title }))) {
-    try { localStorage.removeItem(`pta.consigli.${m.id}`); } catch { /* niente */ }
+    try { localStorage.removeItem(`pna.consigli.${m.id}`); } catch { /* niente */ }
     job("/api/academy/network", {});
   }
 }
@@ -369,7 +369,7 @@ async function academyObserve(step) {
 
 /* I consigli del collega senior per la challenge in corso: quanti ne ha già chiesti il giocatore (nel browser). */
 function consigliRicevuti(mid) {
-  try { return +(localStorage.getItem(`pta.consigli.${mid}`) || 0); } catch { return 0; }
+  try { return +(localStorage.getItem(`pna.consigli.${mid}`) || 0); } catch { return 0; }
 }
 /* Il prossimo consiglio della challenge in corso (senza darlo), null se la challenge non ne ha, {finiti} se li ha
  * già avuti tutti. Lo usa l'ufficio (storia.js): i consigli si chiedono a Jody. */
@@ -384,11 +384,11 @@ function consiglioSuccessivo() {
 function segnaConsiglio() {
   const m = S && S.academy && S.academy.current;
   if (!m) return;
-  try { localStorage.setItem(`pta.consigli.${m.id}`, consigliRicevuti(m.id) + 1); } catch { /* niente */ }
+  try { localStorage.setItem(`pna.consigli.${m.id}`, consigliRicevuti(m.id) + 1); } catch { /* niente */ }
   gameSig = ""; renderGame();
 }
 
-/* La finestra con il viaggio del ping (traccia della simulazione di Packet Tracer). */
+/* La finestra con il viaggio del ping (la traccia calcolata dal server, confermata dal ping vero). */
 function mostraTraccia(tr, spiegazione) {
   const stato = { sent: tt("accademia.traccia_inviato"), accepted: tt("accademia.traccia_accettato"), dropped: tt("accademia.traccia_scartato") };
   const fondo = document.createElement("div");
@@ -599,9 +599,9 @@ function renderCanvas() {
 }
 
 function svgPoint(evt) {
-  const pt = svg.createSVGPoint();
-  pt.x = evt.clientX; pt.y = evt.clientY;
-  return pt.matrixTransform(svg.getScreenCTM().inverse());
+  const punto = svg.createSVGPoint();
+  punto.x = evt.clientX; punto.y = evt.clientY;
+  return punto.matrixTransform(svg.getScreenCTM().inverse());
 }
 
 function setTool(nuovo, kind = null) {
@@ -900,7 +900,7 @@ async function runCli(cmds) {
 const PORTE_NOTE = { www: 80, http: 80, ftp: 21, ssh: 22, telnet: 23, smtp: 25, domain: 53, pop3: 110, https: 443 };
 const GRAVITA = { high: "alta", medium: "media", low: "bassa" };
 
-/* Una riga IOS dell'ACL («deny tcp 192.168.1.0 0.0.0.255 host 192.168.0.3 eq www») → regola dell'API, o null. */
+/* Una riga dell'ACL («deny tcp 192.168.1.0 0.0.0.255 host 192.168.0.3 eq www») → regola dell'API, o null. */
 function aclParseRule(line, extended) {
   const tk = line.replace(/\(.*?\)/g, " ").trim().split(/\s+/);
   if (/^\d+$/.test(tk[0])) tk.shift();                       // numero di sequenza
@@ -1093,9 +1093,9 @@ function securityPanel(d) {
     ${audit}</details></section>`;
 }
 
-/* ───────────── firewall (ASA): zone e regole ─────────────
+/* ───────────── firewall: zone e regole ─────────────
  * Zone = porte con un nome e un livello di sicurezza; regole = eccezioni («da outside verso dmz, tcp 80: permetti»).
- * Il server le compila in ACL dell'ASA con le risposte (backend/firewall.py). */
+ * Il server le compila in access-list del firewall con le risposte (backend/firewall.py). */
 const ZONE_PROPOSTE = { inside: 100, dmz: 50, outside: 0 };
 function fwPick(n) { fwPort = fwPort === n ? null : n; dirty = false; inspSig = ""; renderInspector(); }
 async function fwZoneSubmit(e) {

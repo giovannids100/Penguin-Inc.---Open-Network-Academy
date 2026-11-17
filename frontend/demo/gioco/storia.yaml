@@ -1,7 +1,7 @@
 # La storyline di Penguin Inc: l'ufficio, i personaggi, le giornate e i dialoghi.
 # Si può cambiare a gioco acceso: basta ricaricare la pagina (il client la riceve da /api/ui → testi.storia).
 #
-# Il motore resta quello di PT Academy: ogni giornata usa le missioni dell'Accademia (accademia.yaml) o i
+# Il motore è quello dell'Accademia: ogni giornata usa le missioni dell'Accademia (accademia.yaml) o i
 # livelli del Pronto Soccorso (pronto-soccorso.yaml). Qui si decide solo QUALI, e cosa si dicono i personaggi.
 #
 # DIALOGHI: una lista di battute. Ogni battuta è «personaggio.espressione: testo», per esempio
@@ -59,9 +59,9 @@ schermata_iniziale:
   nuova: Nuova partita
   nome_mancante: Scrivi un nome per il tuo pinguino.
   conferma_nuova: >-
-    Iniziare una nuova partita? Si riparte dal primo giorno, il tavolo di Packet Tracer viene svuotato e
+    Iniziare una nuova partita? Si riparte dal primo giorno, il tavolo viene svuotato e
     i buoni caffè tornano a zero.
-  nota: "Serve Cisco Packet Tracer aperto, con Extensions → MCP BUILDER."
+  nota: "Si gioca su una rete vera, costruita con Mininet: ogni dispositivo è una piccola macchina Linux."
 
 personaggi:
   jr:
@@ -88,7 +88,7 @@ interfaccia:
   obiettivo: Obiettivo
   nuova_partita: Nuova partita
   conferma_nuova_partita: >-
-    Ricominciare dal primo giorno? Il tavolo di Packet Tracer viene svuotato e i buoni caffè tornano a zero.
+    Ricominciare dal primo giorno? Il tavolo viene svuotato e i buoni caffè tornano a zero.
     Poi potrai scegliere di nuovo il nome.
   vai_al_computer: "🖥️ Il tuo computer"
   torna_in_ufficio: "Torna in ufficio"
@@ -108,9 +108,9 @@ interfaccia:
   giornata_finita: "✅ Lavoro del giorno completato! Torna in ufficio a fare rapporto a Jody."
   missioni_del_giorno: "Lavoro di oggi per <b>{cliente}</b>"
   ticket_in_arrivo: "📨 Nuova richiesta da <b>{cliente}</b>"
-  ticket_testo: "Richiesta {numero} di {totale}: «{titolo}». Aprirla sostituisce la rete sul tavolo di Packet Tracer."
+  ticket_testo: "Richiesta {numero} di {totale}: «{titolo}». Aprirla sostituisce la rete che c'è sul tavolo."
   apri_ticket: "Apri la richiesta"
-  conferma_apri_ticket: "Aprire la richiesta «{titolo}»? La rete che c'è ora sul tavolo di Packet Tracer viene sostituita."
+  conferma_apri_ticket: "Aprire la richiesta «{titolo}»? La rete che c'è ora sul tavolo viene sostituita."
   aiuto_al_lavoro: "Jody sta lavorando sul tuo tavolo…"
   aiuto_fatto: "Jody ha finito: dai un'occhiata al tavolo."
   aiuto_fallito: "Jody ha avuto un problema: {errore}"
@@ -159,8 +159,8 @@ consigli:
 
 giorni:
 
-  # Le challenge (missioni dell'Accademia) sono in accademia.yaml; le topologie di partenza, come file .pkt,
-  # in reti/. Ogni giorno ha tre challenge; dal giorno 2 ognuno parte dalla sua rete (giornoN.pkt).
+  # Le challenge (missioni dell'Accademia) sono in accademia.yaml; le topologie di partenza, come file .yaml,
+  # in reti/. Ogni giorno ha tre challenge; dal giorno 2 ognuno parte dalla sua rete (giornoN.yaml).
   - numero: 1
     titolo: Costruire e collegare le prime reti
     cliente: Penguin Inc
@@ -172,7 +172,7 @@ giorni:
       - sr.caffe: "Eccoti! Tu devi essere <b>{nome}</b>, la nuova recluta. Io sono <b>Jody</b>, senior di Penguin Inc. Caffè?"
       - jr.preoccupato: "Ehm… piacere. Che cosa fa, esattamente, Penguin Inc?"
       - sr.caffe: Reti e sicurezza. Le aziende dell'Antartide ci chiamano e noi le colleghiamo, le aggiustiamo, le proteggiamo.
-      - sr.tastiera: "Si lavora dal computer, con <b>Packet Tracer</b>: quello che costruisci lì è una rete vera, non un disegno."
+      - sr.tastiera: "Si lavora dal computer: quello che costruisci lì è una rete vera, non un disegno. Ogni dispositivo è una piccola macchina Linux, creata con <b>Mininet</b>."
       - sr.tastiera: "Oggi tre challenge. Prima: abbiamo comprato due PC e uno switch, ma una rete ancora non c'è. <b>Costruisci la prima LAN</b>."
       - sr.tastiera: "Poi la colleghiamo all'<b>esterno</b> con un router, e alla fine separiamo <b>due reparti</b>."
       - sr.caffe: "Clicca sul pavimento per muoverti, sulle cose per usarle. La tua scrivania è quella in alto con il monitor spento."
@@ -187,7 +187,7 @@ giorni:
             testo: "A sinistra c'è la challenge: leggi la <b>descrizione</b>, lì trovi i dispositivi e come collegarli. Sotto, i passi: quello con 👉 è il prossimo da fare."
             punta: pannello
           - titolo: Il tavolo
-            testo: "Al centro c'è il tavolo: è la rete vera di <b>Packet Tracer</b>. Tutto quello che fai qui succede davvero in PT."
+            testo: "Al centro c'è il tavolo: è la rete vera, costruita con <b>Mininet</b>. Tutto quello che fai qui succede davvero."
             punta: tavolo
           - titolo: Il Manuale
             testo: "Non sai cos'è uno switch o un indirizzo IP? Apri il <b>Manuale</b>: c'è la teoria in pillole per questa challenge."
@@ -207,7 +207,7 @@ giorni:
             punta: ispettore
           4:
             titolo: La prova del nove
-            testo: "La rete è pronta! Premi <b>Verifica</b>: il gioco fa partire dei ping veri in Packet Tracer, da PC1 a PC2 e ritorno."
+            testo: "La rete è pronta! Premi <b>Verifica</b>: il gioco fa partire dei ping veri, da PC1 a PC2 e ritorno."
             punta: verifica
           5:
             titolo: Il viaggio del ping
@@ -404,3 +404,7 @@ crediti:
           link: https://zanelittle.bandcamp.com/album/a-bag-of-chips-vol-1
         - testo: Licenza Creative Commons Attribuzione 4.0 (CC BY 4.0)
           link: https://creativecommons.org/licenses/by/4.0/deed.it
+    - titolo: La rete
+      righe:
+        - testo: "Costruita con Mininet, su Linux: ogni dispositivo è una piccola macchina vera"
+          link: https://mininet.org/

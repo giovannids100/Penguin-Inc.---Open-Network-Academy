@@ -1,24 +1,24 @@
-"""Firewall (Cisco ASA in Packet Tracer): dalle zone e dalle regole del giocatore alle ACL dell'ASA.
+"""Firewall: dalle zone e dalle regole del giocatore alle access-list del firewall.
 
 Il modello per il giocatore è quello di un firewall vero:
   - ogni porta del firewall è una ZONA con un nome (inside, dmz, outside…) e un LIVELLO di sicurezza 0-100;
   - di base una zona può aprire connessioni verso le zone con livello più basso, mai verso quelle più alte
-    (è il comportamento dell'ASA: la rete interna 100 esce, Internet 0 non entra, la DMZ 50 sta in mezzo);
+    (la rete interna 100 esce, Internet 0 non entra, la DMZ 50 sta in mezzo);
   - le REGOLE sono le eccezioni: «da outside verso dmz, tcp 80 verso 172.16.0.10: permetti», oppure
     «da inside verso outside, tcp 23: nega»;
   - le risposte alle connessioni permesse tornano indietro da sole.
 
-Misurato su Packet Tracer 9 (ASA 5506-X): l'ASA di PT NON tiene lo stato delle connessioni, nemmeno con
-«inspect icmp/http»: una risposta da una zona più bassa verso una più alta viene scartata, e una porta con
-un'ACL scarta tutto ciò che l'ACL non permette. Per non insegnare una cosa sbagliata, il gioco compila le
-regole in ACL complete: per ogni zona un'ACL «PTA_<zona>» applicata in ingresso con, nell'ordine,
+Il firewall del gioco non tiene lo stato delle connessioni (rete/kernel.py lo realizza con nftables senza
+conntrack, rete/percorso.py lo spiega allo stesso modo): una zona con un'access-list scarta tutto ciò che
+l'access-list non permette, risposte comprese. Per questo il gioco compila le regole in access-list complete:
+per ogni zona una lista «PNA_<zona>» applicata in ingresso con, nell'ordine,
   1. il ping verso il firewall stesso (il gateway della zona) e le risposte alle connessioni che altre zone
      possono aprire verso questa (porta di origine = servizio);
   2. le regole del giocatore che partono da questa zona;
   3. il comportamento di base: permit verso ogni zona con livello più basso.
 Le risposte al traffico di base sono limitate ai servizi comuni (RITORNI_TCP/UDP e l'echo-reply del ping).
 
-Questo file non chiama Packet Tracer: produce le righe IOS dell'ASA, server.py le esegue.
+Questo file non tocca la rete: produce le righe della console del firewall, server.py le esegue.
 """
 from __future__ import annotations
 
@@ -28,16 +28,16 @@ from dataclasses import dataclass
 PROTOCOLLI = ("ip", "tcp", "udp", "icmp")
 RITORNI_TCP = (80, 443, 21, 22, 23, 25, 53, 110)   # servizi le cui risposte tornano per il traffico di base
 RITORNI_UDP = (53,)
-ACL_PREFISSO = "PTA_"
+ACL_PREFISSO = "PNA_"
 
 
 @dataclass
 class Zona:
-    nome: str                       # nameif dell'ASA (inside, dmz, outside…)
+    nome: str                       # nameif del firewall (inside, dmz, outside…)
     livello: int                    # security-level 0-100
     rete: ipaddress.IPv4Network | None  # rete della porta (None se la porta non ha IP)
     ip: str = ""                    # indirizzo del firewall su quella porta (il gateway della zona)
-    # le reti raggiunte attraverso questa porta con le rotte statiche dell'ASA («route zona rete maschera via»):
+    # le reti raggiunte attraverso questa porta con le rotte statiche del firewall («route zona rete maschera via»):
     # se il firewall sta tra due router, la zona comprende anche le LAN dietro il router di quel lato
     dietro: tuple = ()
 
@@ -47,7 +47,7 @@ class Zona:
 
 
 def indirizzo(v: str, rete: ipaddress.IPv4Network | None) -> str:
-    """Indirizzo di una regola → sintassi ASA. "" = la rete della zona; any; un IP → host; una rete → rete maschera."""
+    """Indirizzo di una regola → sintassi del firewall. "" = la rete della zona; any; un IP → host; una rete → rete maschera."""
     v = (v or "").strip().lower()
     if not v:
         if rete is None:
@@ -99,7 +99,7 @@ def valida_regola(r: dict, zone: dict[str, Zona], i: int) -> dict:
 
 
 def indirizzi(v: str, z: Zona) -> list[str]:
-    """Come indirizzo(), ma "" vale tutte le reti della zona: quella della porta e quelle dietro (rotte dell'ASA)."""
+    """Come indirizzo(), ma "" vale tutte le reti della zona: quella della porta e quelle dietro (rotte del firewall)."""
     if (v or "").strip():
         return [indirizzo(v, z.rete)]
     if not z.reti:
@@ -108,7 +108,7 @@ def indirizzi(v: str, z: Zona) -> list[str]:
 
 
 def compila(zone: dict[str, Zona], regole: list[dict]) -> dict[str, list[str]]:
-    """Zone e regole (già validate) → {zona: righe ACL «permit/deny …»} in sintassi ASA, nell'ordine giusto."""
+    """Zone e regole (già validate) → {zona: righe ACL «permit/deny …»} in sintassi del firewall, nell'ordine giusto."""
     ritorni: dict[str, list[str]] = {z: [] for z in zone}
     proprie: dict[str, list[str]] = {z: [] for z in zone}
     for r in regole:

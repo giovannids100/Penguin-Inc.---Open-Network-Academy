@@ -5,77 +5,67 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Regole di lavoro (obbligatorie)
 
 - **Lingua:** parla sempre in italiano con il team (risposte, commit message, commenti, documentazione).
-- **Branch:** dal 15/11 si lavora su `master` (backend e grafica di Penguin Inc uniti): commit e push direttamente
-  (`git push origin master`), niente altri feature branch né PR. Prima di iniziare fai
-  `git pull --rebase origin master`. `design` è il branch su cui si è lavorato fino al 15/11: `master` lo contiene
-  tutto e `design` resta fermo, come storico; `backend` e `Frontend` sono i branch da cui `design` è nato.
-- **Più agenti sullo stesso branch:** su `master` lavorano più agenti Claude Code da account diversi, che
-  comunicano solo attraverso [`AGENT.md`](AGENT.md) e la cartella [`agenti/`](agenti/) (un file per agente, lo
-  scrive solo il suo proprietario). **Prima di iniziare qualsiasi lavoro** (dopo il `git pull --rebase`) leggi
-  `AGENT.md` e tutti i file in `agenti/`; se non hai ancora un file tuo, prendi `agenti/agente-b.md` se è da
-  completare, altrimenti creane uno nuovo. Segna nel tuo file su cosa stai lavorando e fai push subito, non
-  toccare i file su cui un altro agente sta lavorando, e rispondi ai messaggi indirizzati a te.
+- **Branch:** si lavora su `main`. Prima di iniziare fai `git pull --rebase`.
 
 ## Contesto
 
-**PT Academy** è il progetto per **The Big Hack 2026** (Codemotion × Futuro Remoto, Città della Scienza, Napoli,
-14–15 novembre 2026), challenge **C4 Consorzio Clara** (Cisco Networking Academy): un serious game educativo sul
-networking e la cybersicurezza per giocatori alle prime armi.
-
-- **Consegna: domenica 15/11 ore 12:00.** Privilegia ciò che porta a una demo funzionante.
-- **Criteri della giuria:** utilità/valore, aderenza alla challenge, chiarezza e completezza, design/UX,
-  creatività/innovazione. La UX della demo pesa quanto il backend.
-
-Il repository contiene solo PT Academy. Gli altri prototipi del team (JRPG, C5 Agentic City, documenti della
-hackathon) sono stati tolti da `master` il 14/11 e restano nella storia git (commit `c4b89a1` e precedenti).
+**Penguin Inc. — Open Network Academy** è un serious game educativo sul networking e la cybersicurezza per
+giocatori alle prime armi, nato a **The Big Hack 2026** (Codemotion × Futuro Remoto, Napoli) per la challenge
+C4 Consorzio Clara. Si gioca su una **rete vera** costruita con **Mininet**: ogni dispositivo è un namespace
+Linux, i ping e le connessioni sono traffico vero.
 
 ## Cos'è
 
-Una web app in cui input e output sono una **topologia vera di Cisco Packet Tracer**:
-
 ```
-Browser ──HTTP──▶ server.py ──MCP stdio──▶ packet-tracer-mcp ──bridge :54321──▶ Packet Tracer
+Browser ──HTTP──▶ server.py ──▶ rete/motore.py ──▶ modello della rete ──▶ Mininet (namespace Linux)
 ```
 
-- `server.py`: HTTP (Starlette), endpoint, lavori lunghi, punteggio, motore dei livelli.
-- `ptlink.py`: sessione MCP verso PT (`PTLink`, un lock per tutto) e fotografia della rete (`Topo`).
-- Tutto il backend è in `backend/` (`server.py`, `ptlink.py`, `contenuti.py`, `missions.py`, `rescue.py`, `campagna.py`,
-  `firewall.py`). Oltre a router, switch, PC e server il gioco gestisce firewall (ASA 5506-X, zone e DMZ),
-  servizi cloud fittizi, servizi esposti, scanner di porte, sniffer e limiti di velocità.
-- `missions.py`, `rescue.py` e `campagna.py`: motore (controlli, verifiche, giorni e aiuti), niente testi.
-  `contenuti.py` carica il pacchetto di gioco.
+- `backend/server.py`: HTTP (Starlette), endpoint, lavori lunghi, punteggio, motore dei livelli.
+- `backend/rete/`: il motore di rete.
+  - `modello.py`: la rete come dati (dispositivi, porte, cavi, configurazioni), tabelle di routing (statiche e
+    OSPF), domini L2 e VLAN, la fotografia per il gioco. È la fonte di verità.
+  - `console.py`: la console di router, switch e firewall (sintassi da riga di comando standard: `interface`,
+    `ip address`, `ip route`, `access-list`, `router ospf`, `nameif`…), con login, `show` e `running-config`.
+  - `percorso.py`: la traccia di un pacchetto passo per passo, con il motivo di ogni scarto.
+  - `kernel.py`: realizza il modello con Mininet (veth, bridge con VLAN, `nftables`, `tc`, `dnsmasq`, servizi).
+  - `strumenti.py`: i programmi che girano dentro i dispositivi (servizi dei server, web, sonda TCP, DNS).
+  - `motore.py`: la facciata che usa `server.py`; sceglie tra rete vera e rete **simulata** (senza Mininet le
+    prove si calcolano sul modello).
+  - `topologia.py`: le reti di partenza YAML (`frontend/demo/gioco/reti/*.yaml`) → modello.
+- `missions.py`, `rescue.py`, `campagna.py`, `firewall.py`: motore di gioco (controlli, verifiche, giorni e
+  aiuti, compilazione delle regole del firewall), niente testi. `contenuti.py` carica il pacchetto di gioco.
 - La storia è **Penguin Inc**, in due forme da riunire: `storia.yaml` + `scripts/storia.js` è quella che il
-  client demo mostra (ufficio in pixel art, Jody, giornate 1–3, progresso nel browser); `campagna.yaml` è la
-  campagna del backend (sette giorni, buoni e aiuti salvati sul server, parte cyber con i livelli 5–9),
-  esposta dall'API (`campaign` nello Stato, `/api/campaign/*`) ma non ancora usata dal client.
-- `PTA_COLLAUDO=1` = modalità sviluppo: cheat di debug nel client e controlli all'avvio dei livelli.
-- `frontend/demo/`: client (`index.html`, `assets/`, `scripts/app.js`); `frontend/demo/gioco/*.yaml`: **tutta la parte ludica** (testi, missioni, livelli, punteggi, dispositivi). I contenuti si cambiano lì, non nel codice.
-- `Avvia PT Academy.command`: lanciatore da doppio clic (macOS; Linux con `bash`).
+  client demo mostra (ufficio in pixel art, Jody, giornate 1–4, progresso nel browser); `campagna.yaml` è la
+  campagna del backend, esposta dall'API (`campaign` nello Stato, `/api/campaign/*`) ma non ancora usata dal client.
+- `PNA_COLLAUDO=1` = modalità sviluppo: cheat di debug nel client e controlli all'avvio dei livelli.
+- `frontend/demo/`: client (`index.html`, `assets/`, `scripts/app.js`); `frontend/demo/gioco/*.yaml`: **tutta la
+  parte ludica** (testi, missioni, livelli, punteggi, dispositivi, reti di partenza). I contenuti si cambiano lì,
+  non nel codice.
+- `Dockerfile`, `docker-compose.yml`, `deploy/`: il deploy (container senza privilegi, profilo seccomp,
+  `mnexec` di Mininet modificato). `Avvia Penguin Inc.command`: lanciatore da doppio clic.
 
-Documentazione da leggere prima di toccare il backend: [`backend/docs/API.md`](backend/docs/API.md) (contratto HTTP) e
-[`backend/docs/ARCHITETTURA.md`](backend/docs/ARCHITETTURA.md) (come funziona, come aggiungere endpoint, missioni e livelli,
-trappole di Packet Tracer già misurate). Demo per la giuria: [`DEMO.md`](DEMO.md). Tienile aggiornate quando
-cambi il codice.
+Documentazione da leggere prima di toccare il backend: [`backend/docs/API.md`](backend/docs/API.md) (contratto
+HTTP) e [`backend/docs/ARCHITETTURA.md`](backend/docs/ARCHITETTURA.md) (come funziona, come aggiungere endpoint,
+missioni, livelli e reti). Demo: [`DEMO.md`](DEMO.md). Tienile aggiornate quando cambi il codice.
 
 ## Avvio e prove
 
-- Avvio: doppio clic su `Avvia PT Academy.command`, oppure `uv run --directory backend server.py` e http://127.0.0.1:8787.
-  Serve Packet Tracer aperto con **Extensions → MCP BUILDER**.
-- Senza `PTA_CODE` non c'è login e il server risponde solo a richieste per `127.0.0.1`/`localhost`; con
-  `PTA_CODE` serve il login (necessario per giocare da altri dispositivi). `PTA_HOST` è l'indirizzo di ascolto
-  (default `127.0.0.1`; `0.0.0.0` per la rete locale, insieme a `PTA_CODE`).
-- La partita è in `backend/data/state.json` (fuori da git, contiene anche le password dei dispositivi simulati):
-  cancellarla a server fermo per ripartire da zero.
-- Non esistono test automatici: le prove si fanno dal vivo su Packet Tracer (curl sugli endpoint, oppure il
-  gioco nel browser).
+- Avvio: `docker compose up -d --build` e http://127.0.0.1:8787 (oppure doppio clic su `Avvia Penguin Inc.command`).
+- Senza Docker: `python3 backend/server.py`; senza Mininet la rete è simulata (`PNA_RETE=simulata` la forza).
+- Senza `PNA_CODE` non c'è login e il server risponde solo a richieste per `127.0.0.1`/`localhost`; con
+  `PNA_CODE` serve il login (necessario per giocare da altri dispositivi). `PNA_HOST` è l'indirizzo di ascolto.
+- La partita è in `backend/data/state.json` e la rete in `backend/data/rete.json` (nel container: volume
+  `partita`; `docker compose down -v` riparte da zero).
+- Non esistono test automatici: le prove si fanno con curl sugli endpoint o nel browser. Il collaudo
+  (`PNA_COLLAUDO=1`) all'avvio di ogni livello controlla che la rete di partenza funzioni e che ogni guasto si veda.
+- Debug della rete vera: `/tmp/pna/` nel container (script, regole nft, log dei demoni, `nodi.json` con il PID
+  di ogni dispositivo); `docker compose exec gioco nsenter -t 1 -U -n -m --preserve-credentials` entra nel
+  namespace del server.
 
 ## Cose da non fare
 
-- **Non cancellare la rete di chi sta giocando.** Avviare un livello o «Ricomincia» sostituisce il tavolo di PT:
-  prima di provarli salva la rete aperta (`pt_save_project`) e alla fine riaprila (`pt_open_project`).
-- **Non avviare due server sulla stessa cartella:** condividono `backend/data/state.json` e si sovrascrivono la partita.
-- **Niente contenuti di terzi** nelle missioni e nei livelli (per esempio i laboratori Cisco NetAcad): le sfide
-  le scriviamo noi.
-- **Non pubblicare il gioco su Internet** (Tailscale Funnel) senza che il team lo chieda, e mai senza `PTA_CODE`.
-- Con Packet Tracer: mai metodi dello Script Engine non documentati senza `try/catch`, mai `for…in` su oggetti
-  di PT (lo fa chiudere). Dettagli nella skill `packet-tracer` e in `docs/ARCHITETTURA.md`.
+- **Non dare privilegi al container** (`privileged`, capability): il gioco è pensato per girare senza.
+- **Niente input del giocatore in una shell:** i comandi della console passano dall'interprete
+  (`rete/console.py`), mai a `bash` dentro i dispositivi.
+- **Niente contenuti di terzi** nelle missioni e nei livelli: le sfide le scriviamo noi.
+- **Non pubblicare il gioco su Internet** senza che il team lo chieda, e mai senza `PNA_CODE`.

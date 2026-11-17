@@ -70,7 +70,7 @@ canvas { display: block; width: 100%; height: 100%; image-rendering: pixelated; 
   <button id="intero" type="button" aria-label="Schermo intero">⛶</button>
   <button id="registra" class="rec" type="button" hidden>⏺ Registra video</button>
 </div>
-<p class="nota" id="nota">Prima versione del trailer di <b>Penguin Inc</b>, il serious game su reti e cybersicurezza dentro Cisco Packet Tracer. Durata 2:32, con musica.</p>
+<p class="nota" id="nota">Prima versione del trailer di <b>Penguin Inc</b>, il serious game su reti e cybersicurezza su una rete vera, costruita con Mininet. Durata 2:32, con musica.</p>
 
 <script>
 "use strict";
@@ -270,7 +270,7 @@ function monitor(t, titoloBarra, entrata = 1) {
   const s = mix(.55, 1, ease(entrata));
   g.save(); g.translate(W / 2, H / 2); g.scale(s, s); g.translate(-W / 2, -H / 2);
   immagine("monitor", MON.x, MON.y, 384 * MON.z, 288 * MON.z);
-  // il tavolo di Packet Tracer: piastrelle di ghiaccio come il pavimento dell'ufficio
+  // il tavolo: piastrelle di ghiaccio come il pavimento dell'ufficio
   g.save(); g.beginPath(); g.rect(SCHERMO.x, SCHERMO.y, SCHERMO.w, SCHERMO.h); g.clip();
   g.fillStyle = C.piastrella; g.fillRect(SCHERMO.x, SCHERMO.y, SCHERMO.w, SCHERMO.h);
   g.strokeStyle = C.riga; g.lineWidth = 2;
@@ -347,7 +347,7 @@ function primoGiorno(t) {
   didascalia(t, 17.3, 21, "GIORNO 1", 64, 28, C.oro);
   battute(t, [
     [24, 28.5, "sr", "caffe", "Eccoti! Tu devi essere Pina, la nuova recluta. Io sono Jody."],
-    [28.5, 33, "sr", "tastiera", "Qui le reti si costruiscono davvero: con Cisco Packet Tracer."],
+    [28.5, 33, "sr", "tastiera", "Qui le reti si costruiscono davvero: ogni dispositivo è una macchina Linux."],
     [33, 35.5, "jr", "preoccupato", "Davvero davvero?"],
     [35.5, 38, "sr", "caffe", "Davvero. Al lavoro!"],
   ]);
@@ -374,7 +374,7 @@ function giornate(t) {
 }
 
 function primaRete(t) {
-  const fine = monitor(t, "PT Academy · Giorno 1 · Pescheria del Fiordo", lin(t, 50, 51.6));
+  const fine = monitor(t, "Penguin Inc. · Giorno 1 · Pescheria del Fiordo", lin(t, 50, 51.6));
   const SW = [640, 270], P1 = [440, 470], P2 = [840, 470], SRV = [920, 280], R1 = [640, 130];
   const comparso = (a) => pop(lin(t, a, a + .4));
   // giorno 1: switch e due PC
@@ -384,7 +384,7 @@ function primaRete(t) {
   const statoPorta = (inizio) => (t < inizio + 1.6 ? C.oro : C.verde);
   if (t > 56.8) { lucina([mix(P1[0], SW[0], .22), mix(P1[1], SW[1], .22)], statoPorta(57)); lucina([mix(SW[0], P1[0], .2), mix(SW[1], P1[1], .2)], statoPorta(57)); }
   if (t > 57.8) { lucina([mix(P2[0], SW[0], .22), mix(P2[1], SW[1], .22)], statoPorta(58)); lucina([mix(SW[0], P2[0], .2), mix(SW[1], P2[1], .2)], statoPorta(58)); }
-  if (t > 52.5) { const k = comparso(52.5); dispositivo("switch", SW[0], SW[1], k, "SW1", "2960"); }
+  if (t > 52.5) { const k = comparso(52.5); dispositivo("switch", SW[0], SW[1], k, "SW1", "Switch"); }
   if (t > 53.8) { const k = comparso(53.8); dispositivo("pc", P1[0], P1[1], k, "PC1", t > 59.5 ? scritto("192.168.10.11/24", t, 59.5, 20) : "senza IP"); }
   if (t > 54.8) { const k = comparso(54.8); dispositivo("pc", P2[0], P2[1], k, "PC2", t > 61 ? scritto("192.168.10.12/24", t, 61, 20) : "senza IP"); }
   if (t > 71.5) { const k = comparso(71.5); dispositivo("server", SRV[0], SRV[1], k, "SRV1", "192.168.10.100/24"); }
@@ -406,7 +406,7 @@ function primaRete(t) {
   if (t < 64) cursore(cx, cy, tappe.some(([ta]) => Math.abs(t - ta) < .25));
   fine();
   didascalia(t, 52, 58.5, "TRASCINA. COLLEGA. CONFIGURA.", 668, 20);
-  didascalia(t, 58.8, 64.5, "OGNI AZIONE SUCCEDE DAVVERO IN PACKET TRACER", 668, 20);
+  didascalia(t, 58.8, 64.5, "OGNI AZIONE SUCCEDE DAVVERO, SU UNA RETE VERA", 668, 20);
   didascalia(t, 65, 71.3, "IL GIOCO CONTROLLA CON PING VERI", 668, 20);
   didascalia(t, 72, 79.6, "GIORNO DOPO GIORNO, LA RETE CRESCE", 668, 20);
 }
@@ -432,7 +432,7 @@ function caffe(t) {
 }
 
 function sicurezza(t) {
-  const fine = monitor(t, "PT Academy · Giorno 3 · Banca dei Ghiacci", lin(t, 98, 99.4));
+  const fine = monitor(t, "Penguin Inc. · Giorno 3 · Banca dei Ghiacci", lin(t, 98, 99.4));
   // le due zone (VLAN) e il gestionale
   const zona = (x, y, w, h, colore, nome, rete) => {
     g.fillStyle = colore; g.fillRect(x, y, w, h);
@@ -516,7 +516,7 @@ function finale(t) {
   testo("PENGUIN INC", 0, 0, PIX(76), C.oro, "center", C.bordo);
   g.restore();
   if (t > 141.6) testo(scritto("Costruisci. Ripara. Difendi.", t, 141.6, 26), W / 2, 270, PIX(26), C.ghiaccio, "center", C.bordo);
-  if (t > 143.3) testo(scritto("Un serious game su reti e cybersicurezza, dentro Cisco Packet Tracer.", t, 143.3, 40), W / 2, 335, VT(40), C.tenue);
+  if (t > 143.3) testo(scritto("Un serious game su reti e cybersicurezza, su reti vere costruite con Mininet.", t, 143.3, 40), W / 2, 335, VT(40), C.tenue);
   [["jr_idle", 330], ["sr_caffe", 790]].forEach(([r, x], i) => {
     if (t < 142 + i * .4) return;
     const y = mix(H + 20, 410, ease(lin(t, 142 + i * .4, 143 + i * .4)));

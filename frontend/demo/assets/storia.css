@@ -134,7 +134,7 @@
 .avvio-monitor img { width: min(90vw, 120vh); animation: zoom .65s ease-in forwards; }
 @keyframes zoom { from { transform: scale(.45); opacity: .4; } 70% { opacity: 1; } to { transform: scale(1.15); opacity: 1; } }
 
-/* ───────────── il «monitor» (l'interfaccia di PT Academy dentro la storia) ───────────── */
+/* ───────────── il «monitor» (l'interfaccia del gioco dentro la storia) ───────────── */
 body.storia .tabs { display: none; }
 .btn-ufficio { display: none; }
 body.storia .btn-ufficio {
@@ -191,7 +191,7 @@ body.storia .app-giorno {
   .fumetto { min-height: 0; }
 }
 
-/* ───────────── collaudo (PTA_COLLAUDO=1): pannello dei cheat per il debug ───────────── */
+/* ───────────── collaudo (PNA_COLLAUDO=1): pannello dei cheat per il debug ───────────── */
 .collaudo { position: fixed; left: 14px; bottom: 14px; z-index: 990; font-family: "Pixelify Sans", system-ui, sans-serif; }
 .collaudo-tasto {
   width: 46px; height: 46px; font-size: 22px; cursor: pointer; background: #f5c542; color: #0e1a33;

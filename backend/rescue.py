@@ -11,7 +11,7 @@ avere iniezione: la rete di partenza è già insicura, e il giocatore deve prote
 
 I livelli veri e propri stanno in pronto-soccorso.yaml del pacchetto di gioco (contenuti.py li trasforma
 negli oggetti di questo file). Come aggiungere un livello: docs/ARCHITETTURA.md, «Aggiungere un livello».
-Questo file non chiama Packet Tracer: definisce il motore, il server lo esegue.
+Questo file non tocca la rete: definisce il motore, il server lo esegue.
 """
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Callable
 
-from ptlink import Topo
+from rete.topo import Topo
 
 # Controllo anti-scorciatoia: (rispettato, motivo mostrato al giocatore se non lo è).
 Require = Callable[[Topo], tuple[bool, str]]
@@ -115,7 +115,6 @@ def audit_clean(device: str, worst: str = "high", codes: list | None = None) -> 
 
     Con codes conta solo le falle con quei codici (es. ["USER_CREDENTIAL_REVERSIBLE"]), qualunque gravità:
     così due guasti dello stesso livello possono controllare falle diverse dello stesso router.
-    In Packet Tracer «enable secret» resta segnalato come algoritmo debole (medium): di solito si usa "high".
     """
     return Check("audit_clean", device=device, worst=worst, codes=list(codes or []))
 
@@ -169,7 +168,7 @@ class Fault:
     id: str
     title: str          # cosa era rotto (mostrato quando è riparato o alla resa)
     symptom: str        # cosa non funziona, detto come lo direbbe un utente
-    inject: list[tuple]  # ("cli", dispositivo, [righe IOS]) | ("hostip", {argomenti di pt_host_ip_config; "@PC1" = IP attuale di PC1}); [] = falla già presente
+    inject: list[tuple]  # ("cli", dispositivo, [righe della console]) | ("hostip", {"device", "mode"?, "ip", "mask", "gateway"; "@PC1" = IP attuale di PC1}); [] = falla già presente
     pings: list[tuple[str, str]]  # scorciatoia per ping(): (dispositivo sorgente, IP o "@DISPOSITIVO")
     hints: list[str]
     solution: str
@@ -186,14 +185,14 @@ class Level:
     """Un livello: rete di partenza, ticket, guasti, ping finali e morale."""
     n: int
     title: str
-    build: dict          # argomenti di pt_full_build
+    build: str           # la topologia di partenza: un file .yaml di gioco/reti/ ("" = si costruisce con «setup»)
     ticket: str
     faults: list[Fault]
     final_pings: list[tuple[str, str]] = field(default_factory=list)
     lesson: str = ""
     final_checks: list[Check] = field(default_factory=list)  # controllo finale oltre ai ping
     traffic: list[tuple[str, str]] = field(default_factory=list)  # traffico di fondo per lo sniffer: (dispositivo, comando)
-    setup: list = field(default_factory=list)  # azioni che costruiscono (o completano) la rete, dopo pt_full_build se c'è
+    setup: list = field(default_factory=list)  # azioni che costruiscono (o completano) la rete, dopo la topologia se c'è
 
     def all_final_checks(self) -> list[Check]:
         return [ping(s, d) for s, d in self.final_pings] + self.final_checks
